@@ -221,7 +221,7 @@ class Manager(Generic[ModelType]):
         except Exception as e: # Catch potential db errors (like unique constraints)
             # print(f"Database error during create/flush: {e}") # Debug
             # Rollback might happen in middleware, but good to have here too
-            # await session.rollback() # Be careful not to interfere with outer transaction
+            await session.rollback() # Be careful not to interfere with outer transaction
             raise # Re-raise the database error
 
 

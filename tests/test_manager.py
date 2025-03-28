@@ -226,10 +226,13 @@ async def test_filter_by_relationship(db_session):
 
 # --- Constraint Tests (Example) ---
 
-async def test_unique_constraint(db_session):
+@pytest.mark.parametrize("commit,team_count", [(True, 1), (False, 0)])
+async def test_unique_constraint(db_session,commit,team_count):
     """Test that unique constraints are enforced (e.g., Team name)."""
     await Team.objects.create(name="UniqueTeam", headquarters="HQ Unique")
     assert await Team.objects.count() == 1
+    if commit:
+        await db_session.commit()
 
     # Try creating another team with the same name
     with pytest.raises(IntegrityError): # SQLAlchemy raises IntegrityError for constraint violations
@@ -239,4 +242,4 @@ async def test_unique_constraint(db_session):
         # the error might occur within the create call.
 
     # Verify count hasn't changed and rollback occurred (implicitly by fixture)
-    assert await Team.objects.count() == 1
+    assert await Team.objects.count() == team_count

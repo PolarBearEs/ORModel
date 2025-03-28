@@ -53,41 +53,13 @@ async def db_session(engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
     Provides a database session fixture that also manages the context variable.
     This is crucial for the Manager to work correctly in tests.
     """
-    # Create a session factory bound to the test engine
-    from sqlalchemy.ext.asyncio import async_sessionmaker
-    TestSessionFactory = async_sessionmaker(
-        bind=engine,
-        class_=AsyncSession,
-        expire_on_commit=False,
-    )
-
-    # Use the get_session context manager from your library
-    # It will use the TestSessionFactory implicitly if engine is mocked/patched,
-    # or we can ensure it uses the correct engine context.
-    # For simplicity here, we assume get_session will work if the engine
-    # used internally by ormodel.database is the test_engine.
-    # A more robust way might involve patching or providing the engine.
-
-    # Let's explicitly use the TestSessionFactory with the context manager pattern
-    # Ensure the ormodel context var is set correctly.
-    token = None
-    session: AsyncSession | None = None
-    try:
-        async with TestSessionFactory() as test_session:
-            session = test_session # Keep ref
-            # Set the context variable for the duration of the test
-            token = db_session_context.set(test_session)
-            # print(f"--- DB Session {id(test_session)} acquired ---") # Debug
+    async with AsyncSession(engine) as test_session:  # Use sqlmodel.AsyncSession
+        token = db_session_context.set(test_session)
+        try:
             yield test_session
-            # print(f"--- DB Session {id(test_session)} committing ---") # Debug
-            await test_session.commit() # Commit changes made during the test
-            # print(f"--- DB Session {id(test_session)} committed ---") # Debug
-    except Exception:
-        # print(f"--- DB Session {id(session) if session else 'N/A'} rolling back ---") # Debug
-        if session:
-            await session.rollback()
-        raise # Re-raise the test exception
-    finally:
-        if token:
-            db_session_context.reset(token)
-            # print(f"--- DB Session context reset ---") # Debug
+            await test_session.commit()  # Commit changes made during the test
+        except Exception:
+            await test_session.rollback()  # Rollback on error
+            raise  # Re-raise the exception
+        finally:
+            db_session_context.reset(token)  # Reset the context variable
