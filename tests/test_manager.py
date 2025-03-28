@@ -196,7 +196,7 @@ async def test_create_with_relationship(db_session):
     # ORModel might automatically fetch simple relationships, or need explicit loading
     # Let's try accessing directly
     # Note: Accessing relationship might trigger another query if not eager loaded
-    retrieved_team = await retrieved_hero.awaitable_attrs.team # Use awaitable_attrs for async relationships
+    retrieved_team = retrieved_hero.team # Use awaitable_attrs for async relationships
     assert retrieved_team is not None
     assert retrieved_team.id == team.id
     assert retrieved_team.name == "Test Team"
