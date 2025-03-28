@@ -31,7 +31,7 @@ jobs:
         uses: actions/setup-python@v5
         with:
           python-version: ${{ matrix.python-version }}
-          cache: 'uv' # Enable caching for uv dependencies
+#          cache: 'uv' # Enable caching for uv dependencies # Disabled for now, Caching for 'uv' is not supported
 
       # Step 3: Install uv and project dependencies
       - name: Install uv and Dependencies
