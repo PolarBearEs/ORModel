@@ -1,0 +1,15 @@
+services:
+  # Application Service (Using SQLite)
+  ormodel:
+    build: . # Build the image from the Dockerfile in the current directory
+    ports:
+      - "8000:8000" # Map host port 8000 to container port 8000
+    volumes:
+      # Mount a named volume to persist the SQLite database file
+      - sqlite_data:/app/data
+      - .:/app
+    restart: unless-stopped
+    # No depends_on needed for SQLite
+
+volumes:
+  sqlite_data: # Define the named volume for data persistence

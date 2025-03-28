@@ -1,0 +1,66 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "ormodel"
+version = "0.1.0"
+description = "An async ORM using SQLModel with a Django-like query syntax."
+readme = "README.md"
+requires-python = ">=3.8"
+license = { file = "LICENSE" }
+authors = [
+    { name = "Your Name", email = "your.email@example.com" },
+]
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: OS Independent",
+    "Framework :: AsyncIO",
+    "Topic :: Database",
+]
+dependencies = [
+    "sqlmodel>=0.0.24",
+    "sqlalchemy[asyncio]>=2.0",
+    "alembic>=1.9",
+    "python-dotenv>=1.0",
+    "asyncpg>=0.27",          # Example driver, adjust as needed
+    # Or "psycopg[binary,pool]" for newer psycopg3 async
+    # Or "aiosqlite" for async sqlite
+    "contextvars; python_version < '3.7'", # Built-in >= 3.7
+    "pydantic-settings>=2.8.1",
+]
+
+[project.urls]
+Homepage = "https://github.com/yourusername/ormodel" # Change this
+Repository = "https://github.com/yourusername/ormodel" # Change this
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio", # Essential for async tests
+    "ruff",
+    "httpx", # If testing API endpoints later
+    "fastapi", # Needed if reusing example models/app structure
+    "uvicorn[standard]",
+    "uv",
+    "psycopg2-binary", # Example sync driver for Alembic (Postgres)
+    "aiosqlite",       # Async driver for SQLite (used in tests)
+    # Add any other drivers needed for dev/test
+]
+[tool.hatch.build.targets.sdist]
+include = [
+    "/ormodel",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["ormodel"]
+
+# Optional: Ruff configuration
+[tool.ruff]
+line-length = 88
+select = ["E", "W", "F", "I", "UP", "ASYNC"]
+ignore = []
+
+[tool.ruff.format]
+quote-style = "double"
