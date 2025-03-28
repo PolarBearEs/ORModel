@@ -1,5 +1,5 @@
 # ormodel/base.py
-from typing import ClassVar, Type, TypeVar
+from typing import ClassVar, Type, TypeVar, TYPE_CHECKING,Self
 
 from sqlmodel import SQLModel
 
@@ -18,7 +18,11 @@ class ORModel(SQLModel):
     """
     # ClassVar tells type checkers this belongs to the class, not instances
     # Type hint needs to refer to the new class name, use string forward reference
-    objects: ClassVar[Manager["ORModel"]] # type: ignore # Specific type attached below
+
+    if TYPE_CHECKING:
+        objects: ClassVar[Manager[Self]] # type: ignore # Specific type attached below
+    else:
+        objects: ClassVar[Manager["ORModel"]]  # type: ignore # Specific type attached below
 
     # Reference the central metadata from the original SQLModel library
     # This ensures Alembic can find tables correctly.
