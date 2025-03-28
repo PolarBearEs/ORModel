@@ -1,0 +1,49 @@
+name: Run Python Tests
+
+# Controls when the workflow will run
+on:
+  push:
+    branches: [ main ] # Or 'master' if that's your default branch
+  pull_request:
+    branches: [ main ] # Or 'master'
+
+# A workflow run is made up of one or more jobs that can run sequentially or in parallel
+jobs:
+  # This workflow contains a single job called "test"
+  test:
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+
+    # Define strategy for multiple Python versions (optional, start with one)
+    strategy:
+      fail-fast: false # Don't cancel all jobs if one Python version fails
+      matrix:
+        python-version: ['3.11'] # Add other versions like '3.9', '3.10', '3.12' if desired
+
+    # Steps represent a sequence of tasks that will be executed as part of the job
+    steps:
+      # Step 1: Check out the repository code under $GITHUB_WORKSPACE
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # Step 2: Set up Python environment for the specific version in the matrix
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: 'uv' # Enable caching for uv dependencies
+
+      # Step 3: Install uv and project dependencies
+      - name: Install uv and Dependencies
+        run: |
+          # Install uv itself using pip (which comes with setup-python)
+          pip install uv
+          # Use uv to install project dependencies, including dev extras needed for tests
+          # Use --system for simpler path handling in CI environments
+          uv pip install --system --no-cache -e ".[dev]"
+
+      # Step 4: Run pytest
+      # Pytest executable should be available in PATH after uv installation
+      - name: Run tests with pytest
+        run: |
+          pytest -v tests/
