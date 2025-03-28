@@ -2,9 +2,9 @@ import asyncio
 from typing import Any, Generic, List, Optional, Sequence, Type, TypeVar, cast
 
 from sqlalchemy import func, select as sa_select
-from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import select
 from sqlalchemy.sql.elements import BinaryExpression
-from sqlmodel import  select # Use SQLModel's select for better typing
+from sqlmodel.ext.asyncio.session import AsyncSession
 
 from .database import get_session_from_context
 from .exceptions import DoesNotExist, MultipleObjectsReturned
@@ -30,7 +30,7 @@ class Query(Generic[ModelType]):
 
     async def _execute(self):
         """Executes the internal statement."""
-        return await self._session.execut(self._statement)
+        return await self._session.exec(self._statement)
 
     async def all(self) -> Sequence[ModelType]:
         """Executes the query and returns all results."""
@@ -50,7 +50,7 @@ class Query(Generic[ModelType]):
         """
         # Limit to 2 to check if more than one exists efficiently
         cloned_statement = self._statement.limit(2)
-        results = await self._session.execut(cloned_statement)
+        results = await self._session.exec(cloned_statement)
         all_results = results.all()
         count = len(all_results)
         if count == 0:
@@ -69,7 +69,7 @@ class Query(Generic[ModelType]):
         """
         # Limit to 2 to check efficiently
         cloned_statement = self._statement.limit(2)
-        results = await self._session.execute(cloned_statement)
+        results = await self._session.exec(cloned_statement)
         all_results = results.all()
         count = len(all_results)
 
@@ -79,7 +79,7 @@ class Query(Generic[ModelType]):
             raise MultipleObjectsReturned(
                 f"Expected one result for {self._model_cls.__name__}, but found {count}"
             )
-        return all_results[0][0]
+        return all_results[0]
 
 
     async def get(self, *args: BinaryExpression, **kwargs: Any) -> ModelType:
@@ -140,7 +140,7 @@ class Query(Generic[ModelType]):
             count_statement = count_statement.where(where_clause)
 
         # print(f"Executing 'count' query: {count_statement}") # Debug print
-        result = await self._session.execute(count_statement)
+        result = await self._session.exec(count_statement)
         scalar_result = result.scalar_one()
         return cast(int, scalar_result) # Cast for type safety
 
@@ -168,7 +168,7 @@ class Manager(Generic[ModelType]):
 
     def __init__(self, model_cls: Type[ModelType]):
         self._model_cls = model_cls
-        self._session: Optional[AsyncSession] = None # Session fetched on demand
+        self._session: Optional[AsyncSession] = None  # Use sqlmodel.AsyncSession
 
     def _get_session(self) -> AsyncSession:
         """Internal helper to get the session from context."""
