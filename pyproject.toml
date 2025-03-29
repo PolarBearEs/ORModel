@@ -14,6 +14,9 @@ authors = [
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "License :: OSI Approved :: MIT License",
     "Operating System :: OS Independent",
     "Framework :: AsyncIO",
@@ -21,13 +24,6 @@ classifiers = [
 ]
 dependencies = [
     "sqlmodel>=0.0.24",
-    "sqlalchemy[asyncio]>=2.0",
-    "alembic>=1.9",
-    "python-dotenv>=1.0",
-    "asyncpg>=0.27",          # Example driver, adjust as needed
-    # Or "psycopg[binary,pool]" for newer psycopg3 async
-    # Or "aiosqlite" for async sqlite
-    "contextvars; python_version < '3.7'", # Built-in >= 3.7
 ]
 
 [project.urls]
@@ -46,7 +42,6 @@ dev = [
     "orjson>=3.10.16",  # Faster JSON encoding/decoding
     "uvicorn[standard]",
     "uv",
-    "psycopg2-binary", # Example sync driver for Alembic (Postgres)
     "aiosqlite",       # Async driver for SQLite (used in tests)
     # Add any other drivers needed for dev/test
 ]
