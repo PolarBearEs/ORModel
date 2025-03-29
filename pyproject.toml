@@ -10,7 +10,7 @@ readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [
-    { name = "Your Name", email = "your.email@example.com" },
+    { name = "PolarBearEs", email = "contact@polarbear.es" },
 ]
 classifiers = [
     "Programming Language :: Python :: 3",
@@ -27,8 +27,8 @@ dependencies = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/yourusername/ormodel" # Change this
-Repository = "https://github.com/yourusername/ormodel" # Change this
+Homepage = "https://github.com/PolarBearEs/ORModel"
+Repository = "https://github.com/PolarBearEs/ORModel"
 
 [project.optional-dependencies]
 dev = [
