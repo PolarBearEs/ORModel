@@ -1,0 +1,56 @@
+# .github/workflows/publish-to-pypi.yml
+name: Publish Python Package to PyPI on Release
+
+# Trigger: Runs only when a release is published on GitHub
+on:
+  release:
+    types: [published] # Important: only run on full publish, not pre-release or draft
+
+# Permissions: Need permissions to read contents and potentially write deployment statuses
+permissions:
+  contents: read
+  # id-token: write # Only needed if using PyPI Trusted Publishing (more advanced)
+
+jobs:
+  deploy:
+    name: Build and publish Python distributions to PyPI
+    runs-on: ubuntu-latest
+    # Optional but recommended: Define deployment environment for potential protection rules
+    environment: pypi
+
+    # --- Prevent publishing pre-releases (optional but recommended) ---
+    if: github.event.release.prerelease == false
+
+    steps:
+    - name: Checkout repository
+      # Checks out the code associated with the release tag
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      # Use a specific Python version consistent with your project's minimum requirement
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11' # Or your project's target version
+
+    - name: Install uv, build tools, and dependencies
+      run: |
+        pip install uv
+        # Install build tools. Dependencies not strictly needed for build itself,
+        # but good practice to ensure build environment is consistent.
+        # No need to install the project itself here (-e .)
+        uv pip install --system --no-cache build twine
+
+    - name: Build wheel and sdist
+      run: |
+        python -m build
+
+    - name: Publish distribution to PyPI
+      # Use the API token stored in GitHub Secrets
+      env:
+        # Use __token__ as username for token authentication
+        TWINE_USERNAME: __token__
+        # Pass the API token securely from GitHub Secrets
+        TWINE_PASSWORD: ${{ secrets.PYPI_API_TOKEN }}
+      run: |
+        # Upload all files in dist/ (sdist and wheel)
+        twine upload dist/*
