@@ -4,8 +4,8 @@
 from sqlmodel import *
 from .base import ORModel, get_defined_models # <-- Changed from ORModel to ORModel
 
-from .database import get_session, engine, metadata, AsyncSessionFactory, get_session_from_context, db_session_context
+from .database import get_session, init_database, get_session_from_context, db_session_context,get_engine,shutdown_database,database_context
 from .exceptions import DoesNotExist, MultipleObjectsReturned
 from .manager import Manager, Query
-from .config import get_settings
 
+metadata = ORModel.metadata

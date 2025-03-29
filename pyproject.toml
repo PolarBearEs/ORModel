@@ -28,7 +28,6 @@ dependencies = [
     # Or "psycopg[binary,pool]" for newer psycopg3 async
     # Or "aiosqlite" for async sqlite
     "contextvars; python_version < '3.7'", # Built-in >= 3.7
-    "pydantic-settings>=2.8.1",
 ]
 
 [project.urls]
@@ -38,10 +37,13 @@ Repository = "https://github.com/yourusername/ormodel" # Change this
 [project.optional-dependencies]
 dev = [
     "pytest",
+    "pytest-env>=1.1.5",
     "pytest-asyncio", # Essential for async tests
+    "pydantic-settings>=2.8.1",
     "ruff",
-    "httpx", # If testing API endpoints later
+    "httpx>=0.28.1", # If testing API endpoints later
     "fastapi", # Needed if reusing example models/app structure
+    "orjson>=3.10.16",  # Faster JSON encoding/decoding
     "uvicorn[standard]",
     "uv",
     "psycopg2-binary", # Example sync driver for Alembic (Postgres)
@@ -64,3 +66,6 @@ ignore = []
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.pytest_env]
+DATABASE_URL = "sqlite+aiosqlite:////app/data/default.db"
