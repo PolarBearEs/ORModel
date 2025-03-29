@@ -68,4 +68,4 @@ ignore = []
 quote-style = "double"
 
 [tool.pytest_env]
-DATABASE_URL = "sqlite+aiosqlite:////app/data/default.db"
+DATABASE_URL = "sqlite+aiosqlite:///./default.db"

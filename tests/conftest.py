@@ -14,6 +14,7 @@ from httpx import AsyncClient, ASGITransport
 from fastapi import FastAPI, HTTPException
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from examples.config import get_settings
 # --- Import library components INCLUDING METADATA ---
 from ormodel import (
     ORModel, db_session_context, metadata, # <-- IMPORT METADATA HERE
@@ -29,7 +30,7 @@ from examples.api import app as fastapi_app
 
 
 # --- Test Database URL ---
-TEST_DATABASE_URL = "sqlite+aiosqlite:////app/data/default.db"
+TEST_DATABASE_URL = get_settings().DATABASE_URL
 
 # --- Fixtures ---
 
