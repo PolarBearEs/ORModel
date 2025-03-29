@@ -14,7 +14,7 @@ An asynchronous ORM library leveraging SQLModel features, providing a Django ORM
 
 ## Installation
 
-Requires Python 3.8+ and `uv`.
+Requires Python 3.11+ and `uv`.
 
 1.  **Clone the repository (or create files from source):**
     ```bash
