@@ -42,7 +42,10 @@ jobs:
           # Use --system for simpler path handling in CI environments
           uv pip install --system --no-cache -e ".[dev]"
 
-      # Step 4: Run pytest
+      - name: Create Data Directory
+        run: mkdir /app/data -p
+
+      # Step 5: Run pytest
       # Pytest executable should be available in PATH after uv installation
       - name: Run tests with pytest
         run: |
