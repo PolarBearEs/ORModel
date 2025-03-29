@@ -18,7 +18,7 @@ jobs:
     strategy:
       fail-fast: false # Don't cancel all jobs if one Python version fails
       matrix:
-        python-version: ['3.11','3.11', '3.12'] # Add other versions like '3.9', '3.10', '3.12' if desired
+        python-version: ['3.8','3.9', '3.10', '3.11', '3.12', '3.13']
 
     # Steps represent a sequence of tasks that will be executed as part of the job
     steps:

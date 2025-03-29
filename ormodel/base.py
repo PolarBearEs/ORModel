@@ -1,5 +1,5 @@
 # ormodel/base.py
-from typing import ClassVar, Type, TypeVar, TYPE_CHECKING,Self
+from typing import ClassVar, Type, TypeVar, TYPE_CHECKING
 
 from sqlmodel import SQLModel
 
@@ -20,6 +20,10 @@ class ORModel(SQLModel):
     # Type hint needs to refer to the new class name, use string forward reference
 
     if TYPE_CHECKING:
+        try:
+            from typing import Self
+        except ImportError:
+            from typing_extensions import Self
         objects: ClassVar[Manager[Self]] # type: ignore # Specific type attached below
     else:
         objects: ClassVar[Manager["ORModel"]]  # type: ignore # Specific type attached below
