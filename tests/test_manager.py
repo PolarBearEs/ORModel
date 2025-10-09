@@ -182,7 +182,61 @@ async def test_delete_hero(db_session):
         await Hero.objects.get(id=hero_id)
 
 
-# --- Relationship Tests (Example) ---
+async def test_update_single_field(db_session):
+    """Test updating a single field for multiple objects matching a filter."""
+    await Hero.objects.create(name="Update Target 1", secret_name="Before", age=25)
+    await Hero.objects.create(name="Update Target 2", secret_name="Before", age=25)
+    await Hero.objects.create(name="Ignore Me", secret_name="Before", age=30)
+
+    updated_count = await Hero.objects.filter(age=25).update(secret_name="After")
+
+    assert updated_count == 2
+    updated_heroes = await Hero.objects.filter(secret_name="After").all()
+    assert len(updated_heroes) == 2
+    for hero in updated_heroes:
+        assert hero.age == 25
+
+    ignored_hero = await Hero.objects.get(name="Ignore Me")
+    assert ignored_hero.secret_name == "Before"
+
+
+async def test_update_multiple_fields(db_session):
+    """Test updating multiple fields at once."""
+    await Hero.objects.create(name="Multi-Update", secret_name="Original", age=50)
+
+    updated_count = await Hero.objects.filter(name="Multi-Update").update(secret_name="Updated Secret", age=51)
+
+    assert updated_count == 1
+    updated_hero = await Hero.objects.get(name="Multi-Update")
+    assert updated_hero.secret_name == "Updated Secret"
+    assert updated_hero.age == 51
+
+
+async def test_update_with_no_matches(db_session):
+    """Test that update returns 0 when no objects match the filter."""
+    await Hero.objects.create(name="Existing Hero", secret_name="Exists", age=40)
+
+    updated_count = await Hero.objects.filter(name="Non-Existent").update(age=99)
+
+    assert updated_count == 0
+    hero = await Hero.objects.get(name="Existing Hero")
+    assert hero.age == 40
+
+
+async def test_update_all_records(db_session):
+    """Test updating all records by using an empty filter."""
+    await Hero.objects.create(name="Hero 1", secret_name="A", age=10)
+    await Hero.objects.create(name="Hero 2", secret_name="B", age=20)
+    await Hero.objects.create(name="Hero 3", secret_name="C", age=30)
+
+    total_heroes = await Hero.objects.count()
+    assert total_heroes == 3
+
+    updated_count = await Hero.objects.filter().update(age=100)
+
+    assert updated_count == total_heroes
+    final_count = await Hero.objects.filter(age=100).count()
+    assert final_count == total_heroes
 
 
 async def test_create_with_relationship(db_session):
@@ -190,22 +244,12 @@ async def test_create_with_relationship(db_session):
     team = await Team.objects.create(name="Test Team", headquarters="Test HQ")
     assert team.id is not None
 
-    hero = await Hero.objects.create(
-        name="Team Player",
-        secret_name="TP",
-        age=28,
-        team_id=team.id,  # Assign foreign key
-    )
+    hero = await Hero.objects.create(name="Team Player", secret_name="TP", age=28, team_id=team.id)
     assert hero.id is not None
     assert hero.team_id == team.id
 
-    # Verify relationship access (may require refresh or eager loading setup if complex)
-    # A simple refresh after retrieval should work here
     retrieved_hero = await Hero.objects.get(id=hero.id)
-    # ORModel might automatically fetch simple relationships, or need explicit loading
-    # Let's try accessing directly
-    # Note: Accessing relationship might trigger another query if not eager loaded
-    retrieved_team = retrieved_hero.team  # Use awaitable_attrs for async relationships
+    retrieved_team = retrieved_hero.team
     assert retrieved_team is not None
     assert retrieved_team.id == team.id
     assert retrieved_team.name == "Test Team"
@@ -219,23 +263,10 @@ async def test_filter_by_relationship(db_session):
     await Hero.objects.create(name="Hero 2", secret_name="H2", age=30, team_id=team2.id)
     await Hero.objects.create(name="Hero 3", secret_name="H3", age=40, team_id=team1.id)
 
-    # Find heroes belonging to "Team One"
-    # Requires a JOIN - ensure Manager/Query supports this or use SQLAlchemy join syntax
-    # Let's assume a simple filter on team_id works directly for now
     team_one_heroes = await Hero.objects.filter(team_id=team1.id).order_by(Hero.name).all()
     assert len(team_one_heroes) == 2
     assert team_one_heroes[0].name == "Hero 1"
     assert team_one_heroes[1].name == "Hero 3"
-
-    # More advanced: Filter Hero based on Team's name (requires JOIN)
-    # This might need enhancements to the filter method or direct SQLAlchemy use
-    # query = Hero.objects.filter(Team.name == "Team Two").join(Team) # Example of explicit join
-    # team_two_heroes = await query.all()
-    # assert len(team_two_heroes) == 1
-    # assert team_two_heroes[0].name == "Hero 2"
-
-
-# --- Constraint Tests (Example) ---
 
 
 @pytest.mark.parametrize("commit,team_count", [(True, 1), (False, 0)])
@@ -246,12 +277,7 @@ async def test_unique_constraint(db_session, commit, team_count):
     if commit:
         await db_session.commit()
 
-    # Try creating another team with the same name
-    with pytest.raises(IntegrityError):  # SQLAlchemy raises IntegrityError for constraint violations
+    with pytest.raises(IntegrityError):
         await Team.objects.create(name="UniqueTeam", headquarters="HQ Duplicate Attempt")
-        # Note: The actual commit (or flush) triggers the error.
-        # The fixture db_session handles commit/rollback. If create itself flushes,
-        # the error might occur within the create call.
 
-    # Verify count hasn't changed and rollback occurred (implicitly by fixture)
     assert await Team.objects.count() == team_count
