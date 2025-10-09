@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncEngine
 from alembic import context
 
 # --- Project Setup ---
-project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..'))
+project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
 if project_dir not in sys.path:
     sys.path.insert(0, project_dir)
 print(f"Project dir added to sys.path: {project_dir}")
@@ -19,8 +19,10 @@ print(f"Project dir added to sys.path: {project_dir}")
 try:
     # Import metadata directly from the library
     from ormodel import metadata as target_metadata
+
     # Import settings loader from the EXAMPLE's config module
     from examples.config import get_settings
+
     print("Successfully imported ormodel metadata and example settings.")
 except ImportError as e:
     print(f"Error importing from ormodel library or examples.config: {e}")
@@ -29,6 +31,7 @@ except ImportError as e:
 # --- Import Example Models (to ensure they register with library metadata) ---
 try:
     import examples.models
+
     print(f"Successfully imported example models from: {examples.models.__file__}")
     print(f"Metadata tables after model import: {target_metadata.tables.keys()}")
 except ImportError as e:
@@ -36,7 +39,7 @@ except ImportError as e:
     sys.exit(1)
 
 # --- Load Example Settings and Configure Alembic ---
-settings = get_settings() # Load settings using the example's config loader
+settings = get_settings()  # Load settings using the example's config loader
 config = context.config
 
 # Set the sqlalchemy.url in the Alembic config object using the example settings
@@ -54,17 +57,19 @@ if config.config_file_name is not None:
 # --- Migration Functions (remain largely the same) ---
 # target_metadata is now imported from ormodel
 
+
 def run_migrations_offline() -> None:
     """Run migrations in 'offline' mode."""
     url = config.get_main_option("sqlalchemy.url")
     context.configure(
         url=url,
-        target_metadata=target_metadata, # Use library metadata
+        target_metadata=target_metadata,  # Use library metadata
         literal_binds=True,
         dialect_opts={"paramstyle": "named"},
     )
     with context.begin_transaction():
         context.run_migrations()
+
 
 def do_run_migrations(connection):
     """Helper function to run migrations within a context."""
@@ -72,13 +77,14 @@ def do_run_migrations(connection):
     with context.begin_transaction():
         context.run_migrations()
 
+
 async def run_migrations_online() -> None:
     """Run migrations in 'online' mode."""
     connectable = engine_from_config(
         config.get_section(config.config_ini_section),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
-    ) # Uses sync URL from config
+    )  # Uses sync URL from config
 
     if isinstance(connectable, AsyncEngine):
         # This block should generally not be hit if using sync ALEMBIC_DATABASE_URL
@@ -92,6 +98,7 @@ async def run_migrations_online() -> None:
     else:
         print("Error: Could not create engine for online migrations.")
         sys.exit(1)
+
 
 # --- Run ---
 if context.is_offline_mode():

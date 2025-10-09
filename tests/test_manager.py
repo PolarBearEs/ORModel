@@ -1,12 +1,12 @@
 # tests/test_manager.py
 import pytest
-from sqlalchemy.exc import IntegrityError # To test unique constraints
+from sqlalchemy.exc import IntegrityError  # To test unique constraints
 
 # Import your library's exceptions and base model
 from ormodel import DoesNotExist, MultipleObjectsReturned, ORModel
 
 # Import models used for testing
-from examples.models import Hero, Team # Adjust import path if needed
+from examples.models import Hero, Team  # Adjust import path if needed
 
 # Mark all tests in this module to use pytest-asyncio
 pytestmark = pytest.mark.asyncio
@@ -26,6 +26,7 @@ async def test_create_hero(db_session):
     retrieved_hero = await Hero.objects.get(id=hero.id)
     assert retrieved_hero == hero
 
+
 async def test_get_existing_hero(db_session):
     """Test retrieving an existing Hero."""
     hero = await Hero.objects.create(name="Getter", secret_name="Fetcher", age=40)
@@ -34,10 +35,12 @@ async def test_get_existing_hero(db_session):
     assert retrieved_hero.id == hero.id
     assert retrieved_hero.name == "Getter"
 
+
 async def test_get_nonexistent_hero(db_session):
     """Test that getting a non-existent Hero raises DoesNotExist."""
     with pytest.raises(DoesNotExist):
         await Hero.objects.get(id=999)
+
 
 async def test_get_multiple_results_raises_exception(db_session):
     """Test that get() raises MultipleObjectsReturned if >1 match."""
@@ -46,6 +49,7 @@ async def test_get_multiple_results_raises_exception(db_session):
 
     with pytest.raises(MultipleObjectsReturned):
         await Hero.objects.get(name="SameName")
+
 
 async def test_filter_and_all(db_session):
     """Test filtering heroes and retrieving all matches."""
@@ -68,6 +72,7 @@ async def test_filter_and_all(db_session):
     no_heroes = await Hero.objects.filter(name="NonExistent").all()
     assert len(no_heroes) == 0
 
+
 async def test_filter_chaining(db_session):
     """Test chaining multiple filters."""
     await Hero.objects.create(name="Chain", secret_name="One", age=30)
@@ -77,6 +82,7 @@ async def test_filter_chaining(db_session):
     result = await Hero.objects.filter(name="Chain").filter(age=30).all()
     assert len(result) == 1
     assert result[0].secret_name == "One"
+
 
 async def test_count_heroes(db_session):
     """Test counting heroes."""
@@ -90,12 +96,10 @@ async def test_count_heroes(db_session):
     assert await Hero.objects.filter(age=10).count() == 2
     assert await Hero.objects.filter(age=30).count() == 0
 
+
 async def test_get_or_create_does_not_exist(db_session):
     """Test get_or_create when the object doesn't exist."""
-    hero, created = await Hero.objects.get_or_create(
-        name="New Hero",
-        defaults={"secret_name": "Secret", "age": 22}
-    )
+    hero, created = await Hero.objects.get_or_create(name="New Hero", defaults={"secret_name": "Secret", "age": 22})
     assert created is True
     assert hero.id is not None
     assert hero.name == "New Hero"
@@ -103,6 +107,7 @@ async def test_get_or_create_does_not_exist(db_session):
     assert hero.age == 22
     # Verify count
     assert await Hero.objects.count() == 1
+
 
 async def test_get_or_create_exists(db_session):
     """Test get_or_create when the object already exists."""
@@ -113,21 +118,21 @@ async def test_get_or_create_exists(db_session):
     # Attempt get_or_create with the same name
     hero, created = await Hero.objects.get_or_create(
         name="Existing Hero",
-        defaults={"secret_name": "Should Not Be Used", "age": 55} # Defaults ignored
+        defaults={"secret_name": "Should Not Be Used", "age": 55},  # Defaults ignored
     )
     assert created is False
     assert hero.id == initial_id
     assert hero.name == "Existing Hero"
-    assert hero.secret_name == "Original" # Check it wasn't updated
+    assert hero.secret_name == "Original"  # Check it wasn't updated
     assert hero.age == 50
     # Verify count hasn't increased
     assert await Hero.objects.count() == 1
 
+
 async def test_update_or_create_creates_new(db_session):
     """Test update_or_create when the object doesn't exist."""
     hero, created = await Hero.objects.update_or_create(
-        name="UpdateOrCreate New",
-        defaults={"secret_name": "UOC Secret", "age": 44}
+        name="UpdateOrCreate New", defaults={"secret_name": "UOC Secret", "age": 44}
     )
     assert created is True
     assert hero.id is not None
@@ -136,27 +141,29 @@ async def test_update_or_create_creates_new(db_session):
     assert hero.age == 44
     assert await Hero.objects.count() == 1
 
+
 async def test_update_or_create_updates_existing(db_session):
     """Test update_or_create when the object already exists."""
     initial_hero = await Hero.objects.create(name="UpdateMe", secret_name="Before", age=60)
     initial_id = initial_hero.id
 
     hero, created = await Hero.objects.update_or_create(
-        name="UpdateMe", # Match criteria
-        defaults={"secret_name": "After", "age": 61} # Values to update
+        name="UpdateMe",  # Match criteria
+        defaults={"secret_name": "After", "age": 61},  # Values to update
     )
 
     assert created is False
     assert hero.id == initial_id
     assert hero.name == "UpdateMe"
-    assert hero.secret_name == "After" # Check secret_name was updated
-    assert hero.age == 61 # Check age was updated
+    assert hero.secret_name == "After"  # Check secret_name was updated
+    assert hero.age == 61  # Check age was updated
     assert await Hero.objects.count() == 1
 
     # Verify directly from DB
     refreshed_hero = await Hero.objects.get(id=initial_id)
     assert refreshed_hero.secret_name == "After"
     assert refreshed_hero.age == 61
+
 
 async def test_delete_hero(db_session):
     """Test deleting a hero instance."""
@@ -174,7 +181,9 @@ async def test_delete_hero(db_session):
     with pytest.raises(DoesNotExist):
         await Hero.objects.get(id=hero_id)
 
+
 # --- Relationship Tests (Example) ---
+
 
 async def test_create_with_relationship(db_session):
     """Test creating objects with relationships."""
@@ -185,7 +194,7 @@ async def test_create_with_relationship(db_session):
         name="Team Player",
         secret_name="TP",
         age=28,
-        team_id=team.id # Assign foreign key
+        team_id=team.id,  # Assign foreign key
     )
     assert hero.id is not None
     assert hero.team_id == team.id
@@ -196,10 +205,11 @@ async def test_create_with_relationship(db_session):
     # ORModel might automatically fetch simple relationships, or need explicit loading
     # Let's try accessing directly
     # Note: Accessing relationship might trigger another query if not eager loaded
-    retrieved_team = retrieved_hero.team # Use awaitable_attrs for async relationships
+    retrieved_team = retrieved_hero.team  # Use awaitable_attrs for async relationships
     assert retrieved_team is not None
     assert retrieved_team.id == team.id
     assert retrieved_team.name == "Test Team"
+
 
 async def test_filter_by_relationship(db_session):
     """Test filtering based on related model attributes."""
@@ -224,10 +234,12 @@ async def test_filter_by_relationship(db_session):
     # assert len(team_two_heroes) == 1
     # assert team_two_heroes[0].name == "Hero 2"
 
+
 # --- Constraint Tests (Example) ---
 
+
 @pytest.mark.parametrize("commit,team_count", [(True, 1), (False, 0)])
-async def test_unique_constraint(db_session,commit,team_count):
+async def test_unique_constraint(db_session, commit, team_count):
     """Test that unique constraints are enforced (e.g., Team name)."""
     await Team.objects.create(name="UniqueTeam", headquarters="HQ Unique")
     assert await Team.objects.count() == 1
@@ -235,7 +247,7 @@ async def test_unique_constraint(db_session,commit,team_count):
         await db_session.commit()
 
     # Try creating another team with the same name
-    with pytest.raises(IntegrityError): # SQLAlchemy raises IntegrityError for constraint violations
+    with pytest.raises(IntegrityError):  # SQLAlchemy raises IntegrityError for constraint violations
         await Team.objects.create(name="UniqueTeam", headquarters="HQ Duplicate Attempt")
         # Note: The actual commit (or flush) triggers the error.
         # The fixture db_session handles commit/rollback. If create itself flushes,

@@ -9,6 +9,7 @@ pytestmark = pytest.mark.asyncio
 
 # --- Test Team Endpoints ---
 
+
 async def test_create_team_success(async_client: AsyncClient):
     """Test creating a team successfully."""
     team_data = {"name": "Justice League", "headquarters": "Hall of Justice"}
@@ -24,6 +25,7 @@ async def test_create_team_success(async_client: AsyncClient):
     assert "id" in data
     assert isinstance(data["id"], int)
 
+
 async def test_create_team_duplicate_name(async_client: AsyncClient):
     """Test creating a team with a duplicate name fails."""
     team_data = {"name": "Avengers", "headquarters": "Tower"}
@@ -37,10 +39,11 @@ async def test_create_team_duplicate_name(async_client: AsyncClient):
     response2 = await async_client.post("/teams/", json=team_data)
     print(f"--- test_create_team_duplicate_name: Response 2 Status: {response2.status_code} ---")
     print(f"--- test_create_team_duplicate_name: Response 2 JSON: {response2.json()} ---")
-    assert response2.status_code == 409 # Conflict
+    assert response2.status_code == 409  # Conflict
     data = response2.json()
     assert "detail" in data
     assert "already exists" in data["detail"]
+
 
 async def test_read_teams_empty(async_client: AsyncClient):
     """Test reading teams when none exist."""
@@ -50,6 +53,7 @@ async def test_read_teams_empty(async_client: AsyncClient):
     print(f"--- test_read_teams_empty: Response JSON: {response.json()} ---")
     assert response.status_code == 200
     assert response.json() == []
+
 
 async def test_read_teams_with_data(async_client: AsyncClient):
     """Test reading teams after creating some."""
@@ -72,6 +76,7 @@ async def test_read_teams_with_data(async_client: AsyncClient):
 
 # --- Test Hero Endpoints ---
 
+
 async def test_create_hero_success(async_client: AsyncClient):
     """Test creating a hero successfully."""
     # Create a team first
@@ -79,7 +84,12 @@ async def test_create_hero_success(async_client: AsyncClient):
     assert team_resp.status_code == 201
     team_id = team_resp.json()["id"]
 
-    hero_data = {"name": "Robin", "secret_name": "Dick Grayson", "age": 17, "team_id": team_id}
+    hero_data = {
+        "name": "Robin",
+        "secret_name": "Dick Grayson",
+        "age": 17,
+        "team_id": team_id,
+    }
     print("\n--- test_create_hero_success: Sending POST /heroes/ ---")
     response = await async_client.post("/heroes/", json=hero_data)
     print(f"--- test_create_hero_success: Response Status: {response.status_code} ---")
@@ -93,13 +103,15 @@ async def test_create_hero_success(async_client: AsyncClient):
     assert data["team_id"] == hero_data["team_id"]
     assert "id" in data
 
+
 async def test_create_hero_missing_data(async_client: AsyncClient):
     """Test creating a hero with missing required data fails validation."""
-    hero_data = {"name": "Incomplete"} # Missing 'secret_name'
+    hero_data = {"name": "Incomplete"}  # Missing 'secret_name'
     print("\n--- test_create_hero_missing_data: Sending POST /heroes/ ---")
     response = await async_client.post("/heroes/", json=hero_data)
     print(f"--- test_create_hero_missing_data: Response Status: {response.status_code} ---")
-    assert response.status_code == 422 # Unprocessable Entity
+    assert response.status_code == 422  # Unprocessable Entity
+
 
 async def test_read_heroes_empty(async_client: AsyncClient):
     """Test reading heroes when none exist."""
@@ -108,6 +120,7 @@ async def test_read_heroes_empty(async_client: AsyncClient):
     print(f"--- test_read_heroes_empty: Response Status: {response.status_code} ---")
     assert response.status_code == 200
     assert response.json() == []
+
 
 async def test_read_heroes_with_data(async_client: AsyncClient):
     """Test reading heroes after creating some."""
@@ -126,6 +139,7 @@ async def test_read_heroes_with_data(async_client: AsyncClient):
     names = sorted([h["name"] for h in data])
     assert names == ["Batman", "Superman"]
 
+
 async def test_read_single_hero_success(async_client: AsyncClient):
     """Test reading a single existing hero by ID."""
     hero_data = {"name": "Wonder Woman", "secret_name": "Diana Prince", "age": 800}
@@ -141,12 +155,14 @@ async def test_read_single_hero_success(async_client: AsyncClient):
     assert data["id"] == hero_id
     assert data["name"] == hero_data["name"]
 
+
 async def test_read_single_hero_not_found(async_client: AsyncClient):
     """Test reading a single non-existent hero by ID."""
     print("\n--- test_read_single_hero_not_found: Sending GET /heroes/99999 ---")
     response = await async_client.get("/heroes/99999")
     print(f"--- test_read_single_hero_not_found: Response Status: {response.status_code} ---")
     assert response.status_code == 404
+
 
 async def test_update_hero_success(async_client: AsyncClient):
     """Test updating an existing hero successfully."""
@@ -167,12 +183,14 @@ async def test_update_hero_success(async_client: AsyncClient):
     assert data["age"] == update_data["age"]
     assert data["secret_name"] == update_data["secret_name"]
 
+
 async def test_update_hero_not_found(async_client: AsyncClient):
     """Test updating a non-existent hero."""
     print("\n--- test_update_hero_not_found: Sending PATCH /heroes/99999 ---")
     response = await async_client.patch("/heroes/99999", json={"age": 100})
     print(f"--- test_update_hero_not_found: Response Status: {response.status_code} ---")
     assert response.status_code == 404
+
 
 async def test_delete_hero_success(async_client: AsyncClient):
     """Test deleting an existing hero successfully."""
@@ -191,6 +209,7 @@ async def test_delete_hero_success(async_client: AsyncClient):
     get_resp = await async_client.get(f"/heroes/{hero_id}")
     print(f"--- test_delete_hero_success: Verification GET Response Status: {get_resp.status_code} ---")
     assert get_resp.status_code == 404
+
 
 async def test_delete_hero_not_found(async_client: AsyncClient):
     """Test deleting a non-existent hero."""

@@ -5,26 +5,29 @@ from typing import AsyncGenerator, Optional
 
 # --- Use AsyncSession from sqlmodel ---
 from sqlmodel.ext.asyncio.session import AsyncSession
+
 # --------------------------------------
-from sqlalchemy.ext.asyncio import (
-    async_sessionmaker, create_async_engine, AsyncEngine
-)
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine, AsyncEngine
+
 # Keep func for count method later
 from sqlalchemy import func
 
 # Global variables
 _engine: Optional[AsyncEngine] = None
 _session_factory: Optional[async_sessionmaker[AsyncSession]] = None
-_is_shutdown: bool = False # Flag to prevent re-init after shutdown
+_is_shutdown: bool = False  # Flag to prevent re-init after shutdown
 
 # Context variable remains the same
-db_session_context: contextvars.ContextVar[Optional[AsyncSession]] = \
-    contextvars.ContextVar("db_session_context", default=None)
+db_session_context: contextvars.ContextVar[Optional[AsyncSession]] = contextvars.ContextVar(
+    "db_session_context", default=None
+)
+
 
 def init_database(database_url: str, echo_sql: bool = False):
     """Initializes the database engine and session factory."""
     global _engine, _session_factory
-    if _engine is not None: return
+    if _engine is not None:
+        return
 
     print(f"--- [ormodel.database] Initializing database with URL: {database_url} ---")
     try:
@@ -32,8 +35,8 @@ def init_database(database_url: str, echo_sql: bool = False):
         # --- Ensure sessionmaker uses the sqlmodel AsyncSession ---
         _session_factory = async_sessionmaker(
             bind=_engine,
-            class_=AsyncSession, # Now correctly uses sqlmodel's AsyncSession
-            expire_on_commit=False
+            class_=AsyncSession,  # Now correctly uses sqlmodel's AsyncSession
+            expire_on_commit=False,
         )
         # -----------------------------------------------------
         print(f"--- [ormodel.database] Database initialized successfully (Engine ID: {id(_engine)}) ---")
@@ -42,6 +45,7 @@ def init_database(database_url: str, echo_sql: bool = False):
         _engine = None
         _session_factory = None
         raise RuntimeError(f"Failed to initialize database: {e}") from e
+
 
 async def shutdown_database():
     """Disposes the database engine pool and marks as shutdown."""
@@ -63,6 +67,7 @@ async def shutdown_database():
         _session_factory = None
         _is_shutdown = True
 
+
 @asynccontextmanager
 async def database_context(database_url: str, echo_sql: bool = False) -> AsyncGenerator[None, None]:
     """
@@ -82,12 +87,13 @@ async def database_context(database_url: str, echo_sql: bool = False) -> AsyncGe
         # if called after shutdown.
         init_database(database_url, echo_sql)
         print("--- [database_context] Entered context, DB initialized. ---")
-        yield # Code within the 'async with' block runs here
+        yield  # Code within the 'async with' block runs here
     finally:
         # shutdown_database handles skipping if already shutdown or not initialized
         print("--- [database_context] Exiting context, ensuring database shutdown... ---")
         await shutdown_database()
         print("--- [database_context] Database shutdown process complete. ---")
+
 
 @asynccontextmanager
 async def get_session() -> AsyncGenerator[AsyncSession, None]:
@@ -109,12 +115,15 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
             db_session_context.reset(token)
         await session.close()
 
+
 def get_engine() -> AsyncEngine:
     """Returns the initialized database engine."""
-    if _engine is None: raise RuntimeError("ormodel.database not initialized.")
+    if _engine is None:
+        raise RuntimeError("ormodel.database not initialized.")
     return _engine
 
-def get_session_from_context() -> AsyncSession: # Type hint uses sqlmodel's AsyncSession
+
+def get_session_from_context() -> AsyncSession:  # Type hint uses sqlmodel's AsyncSession
     """Retrieves the session from the context variable."""
     session = db_session_context.get()
     if session is None:

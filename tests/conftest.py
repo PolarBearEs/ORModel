@@ -7,20 +7,23 @@ from typing import AsyncGenerator, Generator, Optional
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import (
-    AsyncEngine, create_async_engine, async_sessionmaker
-)
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine, async_sessionmaker
 from httpx import AsyncClient, ASGITransport
 from fastapi import FastAPI, HTTPException
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from examples.config import get_settings
+
 # --- Import library components INCLUDING METADATA ---
 from ormodel import (
-    ORModel, db_session_context, metadata, # <-- IMPORT METADATA HERE
+    ORModel,
+    db_session_context,
+    metadata,  # <-- IMPORT METADATA HERE
     # Import based on which refactor you chose:
     # "Move config out" version:
-    init_database, get_session as original_get_session, get_engine as library_get_engine
+    init_database,
+    get_session as original_get_session,
+    get_engine as library_get_engine,
     # "Move config/db out" version would just be db_session_context, get_session_from_context
 )
 # --- Import original engine for comparison if needed ---
@@ -34,6 +37,7 @@ TEST_DATABASE_URL = get_settings().DATABASE_URL
 
 # --- Fixtures ---
 
+
 @pytest.fixture(scope="session")
 def event_loop():
     """Creates an instance of the default event loop for the session."""
@@ -41,12 +45,16 @@ def event_loop():
     yield loop
     loop.close()
 
+
 @pytest_asyncio.fixture(scope="session")
 async def test_engine() -> AsyncGenerator[AsyncEngine, None]:
     """Creates the dedicated TEST async engine for the test session."""
     print(f"\n--- Creating Test Engine (ID: {id(test_engine)}) for URL: {TEST_DATABASE_URL} ---")
     engine = create_async_engine(
-        TEST_DATABASE_URL, echo=False, future=True, connect_args={"check_same_thread": False}
+        TEST_DATABASE_URL,
+        echo=False,
+        future=True,
+        connect_args={"check_same_thread": False},
     )
     print(f"--- Test Engine created (instance ID: {id(engine)}) ---")
     yield engine
@@ -65,7 +73,7 @@ async def create_drop_tables(test_engine: AsyncEngine) -> AsyncGenerator[None, N
     # Uses the 'metadata' object imported from the 'ormodel' library package
     print(f"---> [create_drop_tables] Current metadata tables: {list(metadata.tables.keys())}")
 
-    expected_tables = {'team', 'hero'}
+    expected_tables = {"team", "hero"}
     if not expected_tables.issubset(metadata.tables.keys()):
         print("!!!!!!!!!! ERROR: METADATA MISSING EXPECTED TABLES !!!!!!!!!!!")
         print(f"Expected: {expected_tables}")
@@ -82,10 +90,11 @@ async def create_drop_tables(test_engine: AsyncEngine) -> AsyncGenerator[None, N
     except Exception as e:
         print(f"!!!!!! ERROR during table creation: {type(e).__name__}: {e} !!!!!!")
         import traceback
+
         traceback.print_exc()
         pytest.fail(f"Failed to create tables: {e}")
 
-    yield # Run the test
+    yield  # Run the test
 
     print(f"\n---> [create_drop_tables] FINISH: Dropping tables (using Test Engine ID: {id(test_engine)})")
     try:
@@ -97,6 +106,8 @@ async def create_drop_tables(test_engine: AsyncEngine) -> AsyncGenerator[None, N
         print("---> [create_drop_tables] Tables DROPPED successfully.")
     except Exception as e:
         print(f"!!!!!! WARNING: Error during table dropping: {type(e).__name__}: {e} !!!!!!")
+
+
 # --- END OF CORRECTED FIXTURE ---
 
 
@@ -114,6 +125,7 @@ def init_library_for_test(test_engine: AsyncEngine):
             pytest.fail(f"Failed to initialize library database for test: {e}")
     else:
         print("--- [init_library_for_test] init_database not found in library, skipping library init. ---")
+
 
 # --- Fixture providing the FastAPI app ---
 @pytest.fixture(scope="function")
@@ -149,11 +161,14 @@ async def db_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, N
         token = db_session_context.set(session)
         yield session
         if session.is_active:
-            try: await session.commit()
-            except Exception: await session.rollback()
+            try:
+                await session.commit()
+            except Exception:
+                await session.rollback()
     except Exception:
         await session.rollback()
         raise
     finally:
-        if token: db_session_context.reset(token)
+        if token:
+            db_session_context.reset(token)
         await session.close()
