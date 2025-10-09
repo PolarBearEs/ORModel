@@ -24,6 +24,7 @@ from ormodel import (
     init_database,
     get_session as original_get_session,
     get_engine as library_get_engine,
+    get_session,
     # "Move config/db out" version would just be db_session_context, get_session_from_context
 )
 # --- Import original engine for comparison if needed ---
@@ -149,26 +150,14 @@ async def async_client(app: FastAPI) -> AsyncGenerator[AsyncClient, None]:
     print("--- HTTPX AsyncClient closed ---")
 
 
-# --- Fixture for DIRECT DB access in tests (e.g., test_manager.py) ---
 @pytest_asyncio.fixture(scope="function")
 async def db_session(test_engine: AsyncEngine) -> AsyncGenerator[AsyncSession, None]:
-    """Provides a direct session fixture using the TEST engine."""
-    DirectTestSessionFactory = async_sessionmaker(bind=test_engine, class_=AsyncSession, expire_on_commit=False)
-    session: AsyncSession = DirectTestSessionFactory()
-    token: Optional[contextvars.Token] = None
-    # print(f"\n--- [db_session fixture] Creating direct session {id(session)} ---") # Debug
-    try:
-        token = db_session_context.set(session)
+    """
+    Provides a direct session for tests that need manual DB access.
+    This now correctly wraps the library's own transactional `get_session`
+    context manager, ensuring commits and rollbacks are handled consistently.
+    """
+    # This fixture now elegantly uses the library's own session provider.
+    # No need to manually manage sessions, context vars, or commits.
+    async with get_session() as session:
         yield session
-        if session.is_active:
-            try:
-                await session.commit()
-            except Exception:
-                await session.rollback()
-    except Exception:
-        await session.rollback()
-        raise
-    finally:
-        if token:
-            db_session_context.reset(token)
-        await session.close()
