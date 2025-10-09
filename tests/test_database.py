@@ -11,7 +11,6 @@ from ormodel.database import get_session
 from examples.models import Hero
 
 # Mark all tests in this module to use pytest-asyncio
-pytestmark = pytest.mark.asyncio
 
 
 async def test_get_session_commits_on_success(test_engine: AsyncEngine):

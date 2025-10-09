@@ -8,19 +8,18 @@ from sqlalchemy.sql.elements import BinaryExpression
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from .database import get_session_from_context, get_session
-from .exceptions import DoesNotExist, MultipleObjectsReturned
+from .exceptions import DoesNotExist, MultipleObjectsReturned, SessionContextError
 
 # Generic Type variable for the ORModel model
 ModelType = TypeVar("ModelType", bound="ORModel")  # Use string forward reference
 
 
-# Remove the decorator and replace with a function to wrap methods with auto-session logic
 async def _with_auto_session(func: Callable, self: Any, *args: Any, **kwargs: Any) -> Any:
     """Function to automatically create a session if one doesn't exist in the context."""
     try:
         get_session_from_context()
         return await func(self, *args, **kwargs)
-    except RuntimeError:
+    except SessionContextError:
         async with get_session() as session:
             return await func(self, *args, **kwargs)
 

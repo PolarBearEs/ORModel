@@ -1,8 +1,7 @@
 # ormodel/__init__.py
 
-# --- Update the import and export name ---
 from sqlmodel import *
-from .base import ORModel, get_defined_models  # <-- Changed from ORModel to ORModel
+from .base import ORModel, get_defined_models
 
 from .database import (
     get_session,
@@ -13,7 +12,8 @@ from .database import (
     shutdown_database,
     database_context,
 )
-from .exceptions import DoesNotExist, MultipleObjectsReturned
+
+from .exceptions import DoesNotExist, MultipleObjectsReturned, SessionContextError
 from .manager import Manager, Query
 
 metadata = ORModel.metadata

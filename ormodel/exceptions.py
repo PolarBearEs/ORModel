@@ -20,3 +20,9 @@ class ConfigError(ORModelError):
     """Raised for configuration-related errors."""
 
     pass
+
+
+class SessionContextError(ORModelError):
+    """Raised when a database session is required but not found in the context."""
+
+    pass

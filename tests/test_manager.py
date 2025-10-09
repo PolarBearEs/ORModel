@@ -9,7 +9,6 @@ from ormodel import DoesNotExist, MultipleObjectsReturned, ORModel
 from examples.models import Hero, Team  # Adjust import path if needed
 
 # Mark all tests in this module to use pytest-asyncio
-pytestmark = pytest.mark.asyncio
 
 
 async def test_create_hero(db_session):

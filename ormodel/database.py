@@ -7,6 +7,7 @@ from typing import AsyncGenerator, Optional
 from sqlmodel.ext.asyncio.session import AsyncSession
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine, AsyncEngine
 from sqlalchemy import func
+from .exceptions import SessionContextError
 
 logger = logging.getLogger(__name__)
 
@@ -101,5 +102,5 @@ def get_engine() -> AsyncEngine:
 def get_session_from_context() -> AsyncSession:
     session = db_session_context.get()
     if session is None:
-        raise RuntimeError("No database session found in context.")
+        raise SessionContextError("No database session found in context.")
     return session
