@@ -1,5 +1,7 @@
 # ORModel
 
+[![codecov](https://codecov.io/gh/aurant/ormodel/branch/main/graph/badge.svg?token=XOGU4WU6CO)](https://codecov.io/gh/aurant/ormodel)
+
 An asynchronous ORM library leveraging SQLModel features, providing a Django ORM-like query syntax (`Model.objects`). Built for use with `asyncio` and frameworks like FastAPI. Managed with `uv`.
 
 ## Features
