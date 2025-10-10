@@ -43,7 +43,7 @@ dev = [
     "uvicorn[standard]",
     "uv",
     "aiosqlite",       # Async driver for SQLite (used in tests)
-    # Add any other drivers needed for dev/test
+    "pytest-cov"
 ]
 [tool.hatch.build.targets.sdist]
 include = [
