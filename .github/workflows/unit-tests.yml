@@ -48,7 +48,13 @@ jobs:
         run: |
           pytest -v tests/
 
+      - name: Generate Coverage Report
+        if: matrix.python-version == '3.11'
+        run: |
+          pytest --cov=ormodel --cov-branch --cov-report=xml
+
       - name: Upload coverage to Codecov
+        if: matrix.python-version == '3.11'
         uses: codecov/codecov-action@v5
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
