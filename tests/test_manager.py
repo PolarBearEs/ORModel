@@ -1,17 +1,25 @@
 # tests/test_manager.py
 import pytest
 from sqlalchemy.exc import IntegrityError  # To test unique constraints
-
-# Import your library's exceptions and base model
-from ormodel import DoesNotExist, MultipleObjectsReturned, ORModel
+from sqlmodel.ext.asyncio.session import AsyncSession # Added for db_session fixture
 
 # Import models used for testing
 from examples.models import Hero, Team  # Adjust import path if needed
 
+# Import your library's exceptions and base model
+from ormodel import DoesNotExist, MultipleObjectsReturned
+from ormodel.manager import Query as ORModelQuery # Added for test_update_without_auto_session_wrapper and test_query_all_direct
+
+
 # Mark all tests in this module to use pytest-asyncio
 
+@pytest.fixture(scope="function", autouse=True)
+async def autouse_db_session(db_session: AsyncSession):
+    """Autouse fixture to ensure db_session is active for all tests in this file."""
+    yield db_session
 
-async def test_create_hero(db_session):
+
+async def test_create_hero():
     """Test creating a single Hero object."""
     hero_data = {"name": "Test Hero", "secret_name": "Tester", "age": 30}
     hero = await Hero.objects.create(**hero_data)
@@ -26,7 +34,7 @@ async def test_create_hero(db_session):
     assert retrieved_hero == hero
 
 
-async def test_get_existing_hero(db_session):
+async def test_get_existing_hero():
     """Test retrieving an existing Hero."""
     hero = await Hero.objects.create(name="Getter", secret_name="Fetcher", age=40)
     retrieved_hero = await Hero.objects.get(id=hero.id)
@@ -35,13 +43,13 @@ async def test_get_existing_hero(db_session):
     assert retrieved_hero.name == "Getter"
 
 
-async def test_get_nonexistent_hero(db_session):
+async def test_get_nonexistent_hero():
     """Test that getting a non-existent Hero raises DoesNotExist."""
     with pytest.raises(DoesNotExist):
         await Hero.objects.get(id=999)
 
 
-async def test_get_multiple_results_raises_exception(db_session):
+async def test_get_multiple_results_raises_exception():
     """Test that get() raises MultipleObjectsReturned if >1 match."""
     await Hero.objects.create(name="SameName", secret_name="One", age=20)
     await Hero.objects.create(name="SameName", secret_name="Two", age=21)
@@ -50,7 +58,7 @@ async def test_get_multiple_results_raises_exception(db_session):
         await Hero.objects.get(name="SameName")
 
 
-async def test_filter_and_all(db_session):
+async def test_filter_and_all():
     """Test filtering heroes and retrieving all matches."""
     await Hero.objects.create(name="Hero A", secret_name="A1", age=25)
     await Hero.objects.create(name="Hero B", secret_name="B1", age=35)
@@ -72,7 +80,7 @@ async def test_filter_and_all(db_session):
     assert len(no_heroes) == 0
 
 
-async def test_filter_chaining(db_session):
+async def test_filter_chaining():
     """Test chaining multiple filters."""
     await Hero.objects.create(name="Chain", secret_name="One", age=30)
     await Hero.objects.create(name="Chain", secret_name="Two", age=40)
@@ -83,7 +91,7 @@ async def test_filter_chaining(db_session):
     assert result[0].secret_name == "One"
 
 
-async def test_count_heroes(db_session):
+async def test_count_heroes():
     """Test counting heroes."""
     assert await Hero.objects.count() == 0
 
@@ -96,7 +104,7 @@ async def test_count_heroes(db_session):
     assert await Hero.objects.filter(age=30).count() == 0
 
 
-async def test_get_or_create_does_not_exist(db_session):
+async def test_get_or_create_does_not_exist():
     """Test get_or_create when the object doesn't exist."""
     hero, created = await Hero.objects.get_or_create(name="New Hero", defaults={"secret_name": "Secret", "age": 22})
     assert created is True
@@ -108,7 +116,7 @@ async def test_get_or_create_does_not_exist(db_session):
     assert await Hero.objects.count() == 1
 
 
-async def test_get_or_create_exists(db_session):
+async def test_get_or_create_exists():
     """Test get_or_create when the object already exists."""
     # Create initial hero
     initial_hero = await Hero.objects.create(name="Existing Hero", secret_name="Original", age=50)
@@ -128,7 +136,7 @@ async def test_get_or_create_exists(db_session):
     assert await Hero.objects.count() == 1
 
 
-async def test_update_or_create_creates_new(db_session):
+async def test_update_or_create_creates_new():
     """Test update_or_create when the object doesn't exist."""
     hero, created = await Hero.objects.update_or_create(
         name="UpdateOrCreate New", defaults={"secret_name": "UOC Secret", "age": 44}
@@ -141,7 +149,7 @@ async def test_update_or_create_creates_new(db_session):
     assert await Hero.objects.count() == 1
 
 
-async def test_update_or_create_updates_existing(db_session):
+async def test_update_or_create_updates_existing():
     """Test update_or_create when the object already exists."""
     initial_hero = await Hero.objects.create(name="UpdateMe", secret_name="Before", age=60)
     initial_id = initial_hero.id
@@ -164,7 +172,7 @@ async def test_update_or_create_updates_existing(db_session):
     assert refreshed_hero.age == 61
 
 
-async def test_delete_hero(db_session):
+async def test_delete_hero():
     """Test deleting a hero instance."""
     hero_to_delete = await Hero.objects.create(name="Deleter", secret_name="Temp", age=1)
     hero_id = hero_to_delete.id
@@ -172,7 +180,7 @@ async def test_delete_hero(db_session):
     assert await Hero.objects.count() == 1
 
     # Delete the instance
-    await Hero.objects.delete(hero_to_delete)
+    await hero_to_delete.delete()
 
     assert await Hero.objects.count() == 0
 
@@ -181,7 +189,22 @@ async def test_delete_hero(db_session):
         await Hero.objects.get(id=hero_id)
 
 
-async def test_update_single_field(db_session):
+async def test_update_instance():
+    """Test updating a hero instance directly."""
+    hero = await Hero.objects.create(name="Updater", secret_name="Original", age=10)
+    hero_id = hero.id
+
+    hero.name = "Updated Updater"
+    hero.age = 11
+    await hero.save()
+
+    updated_hero = await Hero.objects.get(id=hero.id)
+    assert updated_hero.name == "Updated Updater"
+    assert updated_hero.age == 11
+    assert updated_hero.secret_name == "Original" # Should remain unchanged
+
+
+async def test_update_single_field():
     """Test updating a single field for multiple objects matching a filter."""
     await Hero.objects.create(name="Update Target 1", secret_name="Before", age=25)
     await Hero.objects.create(name="Update Target 2", secret_name="Before", age=25)
@@ -199,7 +222,7 @@ async def test_update_single_field(db_session):
     assert ignored_hero.secret_name == "Before"
 
 
-async def test_update_multiple_fields(db_session):
+async def test_update_multiple_fields():
     """Test updating multiple fields at once."""
     await Hero.objects.create(name="Multi-Update", secret_name="Original", age=50)
 
@@ -211,7 +234,7 @@ async def test_update_multiple_fields(db_session):
     assert updated_hero.age == 51
 
 
-async def test_update_with_no_matches(db_session):
+async def test_update_with_no_matches():
     """Test that update returns 0 when no objects match the filter."""
     await Hero.objects.create(name="Existing Hero", secret_name="Exists", age=40)
 
@@ -222,7 +245,7 @@ async def test_update_with_no_matches(db_session):
     assert hero.age == 40
 
 
-async def test_update_all_records(db_session):
+async def test_update_all_records():
     """Test updating all records by using an empty filter."""
     await Hero.objects.create(name="Hero 1", secret_name="A", age=10)
     await Hero.objects.create(name="Hero 2", secret_name="B", age=20)
@@ -238,7 +261,7 @@ async def test_update_all_records(db_session):
     assert final_count == total_heroes
 
 
-async def test_create_with_relationship(db_session):
+async def test_create_with_relationship():
     """Test creating objects with relationships."""
     team = await Team.objects.create(name="Test Team", headquarters="Test HQ")
     assert team.id is not None
@@ -254,7 +277,7 @@ async def test_create_with_relationship(db_session):
     assert retrieved_team.name == "Test Team"
 
 
-async def test_filter_by_relationship(db_session):
+async def test_filter_by_relationship():
     """Test filtering based on related model attributes."""
     team1 = await Team.objects.create(name="Team One", headquarters="HQ1")
     team2 = await Team.objects.create(name="Team Two", headquarters="HQ2")
@@ -266,6 +289,27 @@ async def test_filter_by_relationship(db_session):
     assert len(team_one_heroes) == 2
     assert team_one_heroes[0].name == "Hero 1"
     assert team_one_heroes[1].name == "Hero 3"
+
+
+async def test_join_with_relationship():
+    """Test joining models and filtering across relationships."""
+    team_alpha = await Team.objects.create(name="Team Alpha", headquarters="Alpha HQ")
+    team_beta = await Team.objects.create(name="Team Beta", headquarters="Beta HQ")
+
+    await Hero.objects.create(name="Hero A", secret_name="SA", age=20, team_id=team_alpha.id)
+    await Hero.objects.create(name="Hero B", secret_name="SB", age=30, team_id=team_beta.id)
+    await Hero.objects.create(name="Hero C", secret_name="SC", age=25, team_id=team_alpha.id)
+
+    # Join Hero with Team and filter by Team name
+    heroes_from_alpha_team = await Hero.objects.join(Team).filter(Team.name == "Team Alpha").all()
+
+    assert len(heroes_from_alpha_team) == 2
+    names = sorted([h.name for h in heroes_from_alpha_team])
+    assert names == ["Hero A", "Hero C"]
+
+    # Verify that the joined relationship is loaded
+    for hero in heroes_from_alpha_team:
+        assert hero.team.name == "Team Alpha"
 
 
 @pytest.mark.parametrize("commit,team_count", [(True, 1), (False, 0)])

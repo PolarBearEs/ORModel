@@ -1,19 +1,20 @@
+from collections.abc import Sequence
 from contextlib import asynccontextmanager
-from typing import List, Optional, Sequence
 
 # --- FastAPI Imports ---
-from fastapi import FastAPI, HTTPException, Query as FastAPIQuery, Request
+from fastapi import FastAPI, HTTPException, Request
+from fastapi import Query as FastAPIQuery
 from fastapi.responses import ORJSONResponse
 
 # --- Import library components ---
 from ormodel import (
     DoesNotExist,
     MultipleObjectsReturned,  # Core ORM classes/exceptions
-    init_database,
+    ORModel,
     get_session,  # Library's session/init functions
     get_session_from_context,
+    init_database,
     shutdown_database,
-    ORModel,
 )
 
 # --- Import example-specific config loader ---
@@ -76,23 +77,23 @@ async def db_session_middleware(request: Request, call_next):
 class HeroCreate(ORModel):
     name: str
     secret_name: str
-    age: Optional[int] = None
-    team_id: Optional[int] = None
+    age: int | None = None
+    team_id: int | None = None
 
 
 class HeroRead(ORModel):
     id: int
     name: str
     secret_name: str
-    age: Optional[int] = None
-    team_id: Optional[int] = None
+    age: int | None = None
+    team_id: int | None = None
 
 
 class HeroUpdate(ORModel):
-    name: Optional[str] = None
-    secret_name: Optional[str] = None
-    age: Optional[int] = None
-    team_id: Optional[int] = None
+    name: str | None = None
+    secret_name: str | None = None
+    age: int | None = None
+    team_id: int | None = None
 
 
 class TeamCreate(ORModel):
@@ -122,7 +123,7 @@ async def create_new_team(team_data: TeamCreate):
     return team
 
 
-@app.get("/teams/", response_model=List[TeamRead])
+@app.get("/teams/", response_model=list[TeamRead])
 async def read_all_teams(skip: int = 0, limit: int = 100):
     """Reads all teams with pagination."""
     teams_seq = await Team.objects.all()
@@ -139,13 +140,13 @@ async def create_new_hero(hero_data: HeroCreate):
         raise HTTPException(status_code=400, detail=f"Error creating hero: {type(e).__name__}: {e}")
 
 
-@app.get("/heroes/", response_model=List[HeroRead])
+@app.get("/heroes/", response_model=list[HeroRead])
 async def read_all_heroes(
     skip: int = 0,
     limit: int = 100,
-    name: Optional[str] = None,
-    min_age: Optional[int] = FastAPIQuery(None, description="Minimum age of hero"),
-    team_name: Optional[str] = None,
+    name: str | None = None,
+    min_age: int | None = FastAPIQuery(None, description="Minimum age of hero"),
+    team_name: str | None = None,
 ):
     """Reads heroes with optional filtering and pagination."""
     query = Hero.objects.filter()  # Start with base query
@@ -189,9 +190,7 @@ async def update_single_hero(hero_id: int, hero_update: HeroUpdate):
         for key, value in update_data.items():
             setattr(hero, key, value)
 
-        session.add(hero)
-        await session.flush()
-        await session.refresh(hero)
+        await hero.save()
         return hero
     except DoesNotExist:
         raise HTTPException(status_code=404, detail="Hero not found")
@@ -204,7 +203,7 @@ async def delete_single_hero(hero_id: int):
     """Deletes a hero by ID."""
     try:
         hero = await Hero.objects.get(id=hero_id)
-        await Hero.objects.delete(hero)
+        await hero.delete()
         return None
     except DoesNotExist:
         raise HTTPException(status_code=404, detail="Hero not found")

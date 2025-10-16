@@ -1,5 +1,5 @@
-import os
 from functools import lru_cache
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -25,7 +25,7 @@ class Settings(BaseSettings):
     )
 
 
-@lru_cache()  # Cache the settings object
+@lru_cache  # Cache the settings object
 def get_settings() -> Settings:
     """Returns the cached settings instance."""
     # Explicitly load from .env if it exists relative to this config file or CWD

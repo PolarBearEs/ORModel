@@ -1,37 +1,29 @@
 # tests/conftest.py
 
 import asyncio
-import contextvars
-from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Generator, Optional
+from collections.abc import AsyncGenerator
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine, async_sessionmaker
-from httpx import AsyncClient, ASGITransport
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
+from httpx import ASGITransport, AsyncClient
+from sqlalchemy.ext.asyncio import AsyncEngine, create_async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+# --- Import original engine for comparison if needed ---
+# from ormodel.database import engine as original_engine # Only if using "move config out"
+from examples.api import app as fastapi_app
 from examples.config import get_settings
 
 # --- Import library components INCLUDING METADATA ---
 from ormodel import (
-    ORModel,
-    db_session_context,
-    metadata,  # <-- IMPORT METADATA HERE
+    get_session,
+    # "Move config/db out" version would just be db_session_context, get_session_from_context
     # Import based on which refactor you chose:
     # "Move config out" version:
     init_database,
-    get_session as original_get_session,
-    get_engine as library_get_engine,
-    get_session,
-    # "Move config/db out" version would just be db_session_context, get_session_from_context
+    metadata,  # <-- IMPORT METADATA HERE
 )
-# --- Import original engine for comparison if needed ---
-# from ormodel.database import engine as original_engine # Only if using "move config out"
-
-from examples.api import app as fastapi_app
-
 
 # --- Test Database URL ---
 TEST_DATABASE_URL = get_settings().DATABASE_URL

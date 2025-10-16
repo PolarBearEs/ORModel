@@ -1,13 +1,12 @@
 # examples/alembic/env.py
+import asyncio
 import os
 import sys
 from logging.config import fileConfig
-import asyncio
-
-from sqlalchemy import engine_from_config, pool
-from sqlalchemy.ext.asyncio import AsyncEngine
 
 from alembic import context
+from sqlalchemy import engine_from_config, pool
+from sqlalchemy.ext.asyncio import AsyncEngine
 
 # --- Project Setup ---
 project_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
@@ -18,10 +17,9 @@ print(f"Project dir added to sys.path: {project_dir}")
 # --- Import Library Metadata and Example Config Loader ---
 try:
     # Import metadata directly from the library
-    from ormodel import metadata as target_metadata
-
     # Import settings loader from the EXAMPLE's config module
     from examples.config import get_settings
+    from ormodel import metadata as target_metadata
 
     print("Successfully imported ormodel metadata and example settings.")
 except ImportError as e:

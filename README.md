@@ -8,7 +8,7 @@ An asynchronous ORM library leveraging SQLModel features, providing a Django ORM
 
 *   **Model Definition:** Inherit from `ormodel.ORModel` (built upon `sqlmodel`). Define schema using `sqlmodel.Field`.
 *   **Django-Style Manager:** Access database operations via `YourModel.objects`.
-*   **Async Queries:** `.all()`, `.filter()`, `.get()`, `.create()`, `.get_or_create()`, `.update_or_create()`, `.count()`, `.delete()`.
+*   **Async Queries:** `.all()`, `.filter()`, `.get()`, `.create()`, `.get_or_create()`, `.update_or_create()`, `.save()`, `.update()`, `.count()`, `.delete()`.
 *   **Application-Managed DB Lifecycle:** Library provides `ormodel.init_database`, `ormodel.shutdown_database`, and `ormodel.database_context` for setup/teardown, but the application calls them.
 *   **Session Scoping:** Library provides `ormodel.get_session` async context manager. Application must use this (e.g., in middleware) for the implicit `Model.objects` manager to work.
 *   **Uses SQLAlchemy 2.0+:** Leverages modern async SQLAlchemy.
@@ -196,6 +196,10 @@ the_flash = await Hero.objects.get(name="Flash")
 # Filter (Returns a Query object)
 query_young = Hero.objects.filter(Hero.age < 30) # Use SQLAlchemy expressions
 
+# Filter with multiple conditions (using and_)
+from sqlmodel import and_
+active_young_heroes = await Hero.objects.filter(and_(Hero.age < 30, Hero.secret_name != "")).all()
+
 # Execute Query
 young_heroes = await query_young.all()
 first_young = await query_young.first()
@@ -211,8 +215,21 @@ team, created = await Team.objects.get_or_create(name="Titans", defaults={"headq
 # Update or Create
 hero, created = await Hero.objects.update_or_create(name="Flash", defaults={"age": 29})
 
+# Update
+hero.name = "The Flash"
+await hero.save()
+
+# Bulk Update
+await Hero.objects.filter(name="The Flash").update(age=30)
+
+# Join
+# Assuming Hero has a 'team' relationship
+team_heroes = await Hero.objects.join(Team).filter(Team.name == "Justice League").all()
+for hero in team_heroes:
+    print(f"Hero: {hero.name}, Team: {hero.team.name}")
+
 # Delete
-await Hero.objects.delete(hero)
+await hero.delete()
 ```
 
 ## Running the Example Application

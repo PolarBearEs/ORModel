@@ -1,21 +1,21 @@
 # ormodel/database.py
 import contextvars
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Optional
 
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine, AsyncEngine
-from sqlalchemy import func
+
 from .exceptions import SessionContextError
 
 logger = logging.getLogger(__name__)
 
-_engine: Optional[AsyncEngine] = None
-_session_factory: Optional[async_sessionmaker[AsyncSession]] = None
+_engine: AsyncEngine | None = None
+_session_factory: async_sessionmaker[AsyncSession] | None = None
 _is_shutdown: bool = False
 
-db_session_context: contextvars.ContextVar[Optional[AsyncSession]] = contextvars.ContextVar(
+db_session_context: contextvars.ContextVar[AsyncSession | None] = contextvars.ContextVar(
     "db_session_context", default=None
 )
 
@@ -75,7 +75,7 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
     if _session_factory is None or _engine is None:
         raise RuntimeError("ormodel.database not initialized. Call ormodel.init_database(...) first.")
     session: AsyncSession = _session_factory()
-    token: Optional[contextvars.Token] = None
+    token: contextvars.Token | None = None
     try:
         token = db_session_context.set(session)
         yield session

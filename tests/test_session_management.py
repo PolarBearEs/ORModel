@@ -1,6 +1,9 @@
 import pytest
-from ormodel import get_session
+from sqlmodel import select # Added for tests that use direct select
+
 from examples.models import Hero
+from ormodel import get_session
+from ormodel.manager import Query as ORModelQuery # Added for tests that use direct Query
 
 
 async def test_manual_session_commits_on_success():
@@ -73,3 +76,105 @@ async def test_automatic_session_creation_works():
     retrieved_hero = await Hero.objects.get(id=hero.id)
     assert retrieved_hero is not None
     assert retrieved_hero.name == auto_hero_name
+
+
+@pytest.mark.asyncio
+async def test_with_auto_session_wrapper():
+    """
+    Tests the _with_auto_session wrapper by calling a Manager method
+    without an explicit session in context.
+    """
+    # Ensure no session is active in the context before calling the wrapped method
+    # This is implicitly true if the test doesn't use db_session fixture
+    # and doesn't explicitly call get_session().
+
+    # Call a Manager method that is wrapped by _with_auto_session
+    # Hero.objects.create() is a good candidate.
+    hero = await Hero.objects.create(name="Auto Session Hero", secret_name="Auto Secret")
+
+    assert hero.id is not None
+    assert hero.name == "Auto Session Hero"
+
+    # Verify the hero exists in the database using a separate, explicit session
+    # to ensure the auto-session committed the changes.
+    async with get_session() as session:
+        retrieved_heroes_result = await session.exec(select(Hero))
+        retrieved_heroes = retrieved_heroes_result.all()
+        assert len(retrieved_heroes) == 1
+        assert hero in retrieved_heroes
+
+
+@pytest.mark.asyncio
+async def test_manager_all_no_fixture():
+    """
+    Tests Manager.all() method by explicitly managing the session.
+    """
+    async with get_session() as session:  # noqa: F841
+        # Ensure the database is empty initially
+        assert await Hero.objects.count() == 0
+
+        # Create a few heroes
+        hero1 = await Hero.objects.create(name="No Fixture Hero 1", secret_name="NF Secret 1")
+        hero2 = await Hero.objects.create(name="No Fixture Hero 2", secret_name="NF Secret 2")
+
+        # Retrieve all heroes using Manager.all()
+        all_heroes = await Hero.objects.all()
+
+        assert len(all_heroes) == 2
+        assert hero1 in all_heroes
+        assert hero2 in all_heroes
+
+
+@pytest.mark.asyncio
+async def test_manager_all_with_auto_session_wrapper():
+    """
+    Tests the _with_auto_session wrapper by calling Manager.all()
+    without an explicit session in context.
+    """
+    # Ensure no session is active in the context
+    # Create a few heroes
+    hero1 = await Hero.objects.create(name="Auto All Hero 1", secret_name="AA Secret 1")
+    hero2 = await Hero.objects.create(name="Auto All Hero 2", secret_name="AA Secret 2")
+
+    # Retrieve all heroes using Manager.all()
+    all_heroes = await Hero.objects.all()
+
+    assert len(all_heroes) == 2
+    assert hero1 in all_heroes
+    assert hero2 in all_heroes
+
+    # Verify the heroes exist in the database using a separate, explicit session
+    async with get_session() as session:
+        retrieved_heroes_result = await session.exec(select(Hero))
+        retrieved_heroes = retrieved_heroes_result.all()
+        assert len(retrieved_heroes) == 2
+        assert hero1 in retrieved_heroes
+        assert hero2 in retrieved_heroes
+
+
+@pytest.mark.asyncio
+async def test_query_all_direct_no_fixture():
+    # Create a few heroes using the manager (which will use this explicit session)
+    hero1 = await Hero.objects.create(name="Direct Query No Fixture Hero 1", secret_name="DQNF Secret 1")
+    hero2 = await Hero.objects.create(name="Direct Query No Fixture Hero 2", secret_name="DQNF Secret 2")
+
+    # Retrieve all heroes using this direct Query object
+    all_heroes = await Hero.objects.all()
+
+    assert len(all_heroes) == 2
+    assert hero1 in all_heroes
+    assert hero2 in all_heroes
+
+
+@pytest.mark.asyncio
+async def test_query_filter_all_direct_no_fixture():
+    # Create a few heroes using the manager (which will use this explicit session)
+    hero1 = await Hero.objects.create(name="Direct Query No Fixture Hero 1", secret_name="DQNF Secret 1")
+    hero2 = await Hero.objects.create(name="Direct Query No Fixture Hero 2", secret_name="DQNF Secret 2")
+
+    # Retrieve all heroes using this direct Query object
+    all_heroes = await Hero.objects.filter(Hero.secret_name == "DQNF Secret 1").order_by(Hero.name).all()
+
+    assert len(all_heroes) == 1
+    assert hero1 in all_heroes
+    assert hero2 not in all_heroes

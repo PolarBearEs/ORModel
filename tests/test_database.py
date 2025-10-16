@@ -1,14 +1,14 @@
 # tests/test_database.py
 
 import pytest
-from sqlalchemy.ext.asyncio import async_sessionmaker, AsyncEngine
+from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from sqlmodel.ext.asyncio.session import AsyncSession
-
-# Import the context manager we are testing
-from ormodel.database import get_session
 
 # Import a model to use for testing
 from examples.models import Hero
+
+# Import the context manager we are testing
+from ormodel.database import get_session
 
 # Mark all tests in this module to use pytest-asyncio
 

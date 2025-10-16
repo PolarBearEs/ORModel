@@ -1,13 +1,11 @@
-from typing import Optional
-from ormodel import Field, Relationship  # Import Relationship if defining relations
-
 # Import the base ORModel from YOUR library using the NEW name
-from ormodel import ORModel  # <-- Ensure this uses your library's base
+from ormodel import ORModel
+from sqlmodel import Field, Relationship
 
 
 # Example Model 1
 class Team(ORModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True, unique=True)  # Added unique constraint
     headquarters: str
 
@@ -18,17 +16,17 @@ class Team(ORModel, table=True):
 
 # Example Model 2
 class Hero(ORModel, table=True):
-    id: Optional[int] = Field(default=None, primary_key=True)
+    id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True)
     secret_name: str
-    age: Optional[int] = Field(default=None, index=True)
+    age: int | None = Field(default=None, index=True)
 
     # Foreign Key to Team table
-    team_id: Optional[int] = Field(default=None, foreign_key="team.id")
+    team_id: int | None = Field(default=None, foreign_key="team.id")
 
     # Define the relationship to Team (many-to-one)
     # back_populates links it to the 'heroes' attribute in Team
-    team: Optional[Team] = Relationship(back_populates="heroes")
+    team: Team | None = Relationship(back_populates="heroes")
 
 
 # You can add more models here following the same pattern

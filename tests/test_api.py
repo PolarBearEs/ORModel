@@ -1,6 +1,5 @@
 # tests/test_api.py
 
-import pytest
 from httpx import AsyncClient
 
 # Mark all tests in this module to use pytest-asyncio

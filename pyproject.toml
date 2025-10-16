@@ -23,7 +23,7 @@ classifiers = [
     "Topic :: Database",
 ]
 dependencies = [
-    "sqlmodel>=0.0.24",
+    "sqlmodel>=0.0.25",
 ]
 
 [project.urls]
@@ -32,18 +32,19 @@ Repository = "https://github.com/PolarBearEs/ORModel"
 
 [project.optional-dependencies]
 dev = [
-    "pytest",
-    "pytest-env>=1.1.5",
-    "pytest-asyncio", # Essential for async tests
-    "pydantic-settings>=2.8.1",
-    "ruff",
-    "httpx>=0.28.1", # If testing API endpoints later
-    "fastapi", # Needed if reusing example models/app structure
-    "orjson>=3.10.16",  # Faster JSON encoding/decoding
-    "uvicorn[standard]",
-    "uv",
-    "aiosqlite",       # Async driver for SQLite (used in tests)
-    "pytest-cov"
+    "pytest>=8.4.2",
+    "pytest-env==1.1.5",
+    "pytest-asyncio>=1.2.0", # Essential for async tests
+    "pydantic-settings==2.11.0",
+    "ruff>=0.14.0",
+    "mypy>=1.18.2",
+    "httpx==0.28.1", # If testing API endpoints later
+    "fastapi>=0.118.2", # Needed if reusing example models/app structure
+    "orjson==3.11.3",  # Faster JSON encoding/decoding
+    "uvicorn[standard]>=0.37.0",
+    "uv>=0.9.0",
+    "aiosqlite>=0.21.0",       # Async driver for SQLite (used in tests)
+    "pytest-cov>=7.0.0",
 ]
 [tool.hatch.build.targets.sdist]
 include = [
