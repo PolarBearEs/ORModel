@@ -202,6 +202,7 @@ async def test_update_instance():
     assert updated_hero.name == "Updated Updater"
     assert updated_hero.age == 11
     assert updated_hero.secret_name == "Original" # Should remain unchanged
+    assert await Hero.objects.count() == 1
 
 
 async def test_update_single_field():
@@ -324,3 +325,22 @@ async def test_unique_constraint(db_session, commit, team_count):
         await Team.objects.create(name="UniqueTeam", headquarters="HQ Duplicate Attempt")
 
     assert await Team.objects.count() == team_count
+
+@pytest.mark.asyncio
+async def test_create_hero_and_save():
+    """
+    Test that a Hero can be created and saved to the database using the .save() method.
+    """
+    # 1. Create a Hero instance
+    hero_name = "Test Hero"
+    secret_identity = "Secret Test"
+    hero = await Hero(name=hero_name, secret_name=secret_identity, age=30).save()
+
+    # 3. Verify the hero was saved by querying the database
+    saved_hero = await Hero.objects.get(Hero.name == hero_name)
+
+    assert saved_hero is not None
+    assert saved_hero.name == hero_name
+    assert saved_hero.secret_name == secret_identity
+    assert saved_hero.id is not None
+    assert saved_hero.age == 30

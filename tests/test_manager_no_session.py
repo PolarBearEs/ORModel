@@ -1,7 +1,7 @@
 # tests/test_manager_no_session.py
 import pytest
 from sqlalchemy.exc import IntegrityError
-from sqlmodel import select
+from sqlalchemy.orm.exc import DetachedInstanceError
 
 from examples.models import Hero, Team
 from ormodel import DoesNotExist, MultipleObjectsReturned
@@ -264,10 +264,11 @@ async def test_create_with_relationship_no_session():
     assert hero.team_id == team.id
 
     retrieved_hero = await Hero.objects.get(id=hero.id)
-    retrieved_team = retrieved_hero.team
-    assert retrieved_team is not None
-    assert retrieved_team.id == team.id
-    assert retrieved_team.name == "Test Team NS"
+    with pytest.raises(DetachedInstanceError):
+        retrieved_team = retrieved_hero.team
+        assert retrieved_team is not None
+        assert retrieved_team.id == team.id
+        assert retrieved_team.name == "Test Team NS"
 
 
 async def test_filter_by_relationship_no_session():
@@ -300,9 +301,10 @@ async def test_join_with_relationship_no_session():
     names = sorted([h.name for h in heroes_from_alpha_team])
     assert names == ["Hero A NS", "Hero C NS"]
 
-    # Verify that the joined relationship is loaded
-    for hero in heroes_from_alpha_team:
-        assert hero.team.name == "Team Alpha NS"
+    with pytest.raises(DetachedInstanceError):
+        # Verify that the joined relationship is loaded
+        for hero in heroes_from_alpha_team:
+            assert hero.team.name == "Team Alpha NS"
 
 
 async def test_unique_constraint_no_session():
