@@ -1,6 +1,6 @@
 # ORModel
 
-[![codecov](https://codecov.io/github/PolarBearEs/ORModel/graph/badge.svg?token=XOGU4WU6CO)](https://codecov.io/github/PolarBearEs/ORModel)
+[![codecov](https://codecov.io/gh/PolarBearEs/ORModel/graph/badge.svg)](https://codecov.io/gh/PolarBearEs/ORModel)
 
 Async ORM utilities on top of `sqlmodel` with a `Model.objects` manager API and automatic session handling.
 
