@@ -1,0 +1,29 @@
+## Release Notes
+
+### ✨ New Features
+
+- **Instance-level Operations:** Introduced `save()`, `delete()`, and `refresh()` methods directly on ORM model instances for intuitive data manipulation.
+- **Enhanced Querying:** Added `join()` method to both `Query` and `Manager` classes, enabling complex queries across related models.
+- **Bulk Update Functionality:** Implemented a `update()` method on the `Manager` for efficient bulk updates of records matching a query.
+- **Automatic Session Management:** Introduced an `_with_auto_session` decorator and related infrastructure to automatically handle database sessions for Manager methods, simplifying usage and reducing boilerplate.
+- **Type Hinting Support:** Added `py.typed` file to the package, providing full type-checking support for a more robust development experience.
+- **Flexible Manager Filtering:** Refactored `Manager.filter()` to allow for more flexible and chained filtering operations.
+
+### 🐛 Bug Fixes & Improvements
+
+- **Test Suite Overhaul:** Significantly expanded and improved the test suite, including:
+    - New `test_base.py` for `ORModel` instance methods.
+    - New `test_manager.py` for comprehensive `Manager` functionality.
+    - New `test_manager_no_session.py` to validate manager operations without explicit session passing.
+    - New `test_session_management.py` to thoroughly test manual and automatic session handling.
+    - Refactored existing tests in `test_sqlmodel.py` and `tests/conftest.py` to align with new ORM patterns and fixtures.
+- **Dependency Updates:** Updated `sqlmodel` and various development dependencies to their latest versions for improved performance and stability.
+- **Type Hinting Refinements:** Improved type hints across the `Query` and `Manager` classes for better code clarity and maintainability.
+
+### 🚀 Performance
+
+- Optimized database operations in `Query.update` and `Query.count` by switching to `session.exec` and `result.one()`.
+
+### 🛠️ Breaking Changes (Potentially)
+
+- The internal session management has been significantly refactored. While designed for backward compatibility, users directly interacting with `ormodel.database` or custom session handling might need to review their implementations. The new `get_session()` context manager and `init_database()` function are now the recommended way to interact with the database.

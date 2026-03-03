@@ -1,9 +1,9 @@
 import pytest
-from sqlmodel import select # Added for tests that use direct select
+from sqlmodel import select
 
 from examples.models import Hero
-from ormodel import get_session
-from ormodel.manager import Query as ORModelQuery # Added for tests that use direct Query
+from ormodel import SessionContextError, get_session
+from ormodel.manager import with_auto_session
 
 
 async def test_manual_session_commits_on_success():
@@ -178,3 +178,23 @@ async def test_query_filter_all_direct_no_fixture():
     assert len(all_heroes) == 1
     assert hero1 in all_heroes
     assert hero2 not in all_heroes
+
+
+@pytest.mark.asyncio
+async def test_with_auto_session_does_not_retry_internal_session_context_errors():
+    """SessionContextError raised by method logic should not trigger a second execution."""
+
+    class Probe:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        @with_auto_session
+        async def run(self) -> None:
+            self.calls += 1
+            raise SessionContextError("internal error")
+
+    probe = Probe()
+    with pytest.raises(SessionContextError, match="internal error"):
+        await probe.run()
+
+    assert probe.calls == 1

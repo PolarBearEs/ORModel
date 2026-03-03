@@ -1,22 +1,39 @@
 # tests/test_manager.py
+from enum import StrEnum
+
 import pytest
-from sqlalchemy.exc import IntegrityError  # To test unique constraints
-from sqlmodel.ext.asyncio.session import AsyncSession # Added for db_session fixture
+import pytest_asyncio
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm.exc import DetachedInstanceError
 
-# Import models used for testing
-from examples.models import Hero, Team  # Adjust import path if needed
-
-# Import your library's exceptions and base model
-from ormodel import DoesNotExist, MultipleObjectsReturned
-from ormodel.manager import Query as ORModelQuery # Added for test_update_without_auto_session_wrapper and test_query_all_direct
-
+from examples.models import Hero, Team
+from ormodel import DoesNotExist, MultipleObjectsReturned, get_session, get_session_from_context
 
 # Mark all tests in this module to use pytest-asyncio
 
-@pytest.fixture(scope="function", autouse=True)
-async def autouse_db_session(db_session: AsyncSession):
-    """Autouse fixture to ensure db_session is active for all tests in this file."""
-    yield db_session
+
+class SessionMode(StrEnum):
+    WITH_SESSION = "with_session"
+    AUTO_SESSION = "auto_session"
+
+
+@pytest.fixture(
+    params=list(SessionMode),
+    ids=[mode.value.replace("_", "-") for mode in SessionMode],
+)
+def session_mode(request: pytest.FixtureRequest) -> SessionMode:
+    """Runs each manager test in both explicit-session and auto-session modes."""
+    return request.param
+
+
+@pytest_asyncio.fixture(scope="function", autouse=True)
+async def maybe_session(session_mode: SessionMode):
+    """Provide a request-scoped session only for the explicit-session test mode."""
+    if session_mode is SessionMode.WITH_SESSION:
+        async with get_session():
+            yield
+    else:
+        yield
 
 
 async def test_create_hero():
@@ -89,6 +106,115 @@ async def test_filter_chaining():
     result = await Hero.objects.filter(name="Chain").filter(age=30).all()
     assert len(result) == 1
     assert result[0].secret_name == "One"
+
+
+async def test_filter_with_greater_than_expression():
+    """Comparison filters should use SQL expression arguments."""
+    await Hero.objects.create(name="Junior", secret_name="J", age=17)
+    await Hero.objects.create(name="Senior", secret_name="S", age=30)
+    await Hero.objects.create(name="Veteran", secret_name="V", age=45)
+
+    heroes = await Hero.objects.filter(Hero.age > 18).order_by(Hero.age).all()
+    assert [hero.name for hero in heroes] == ["Senior", "Veteran"]
+
+
+async def test_manager_first_returns_none_then_object():
+    """Manager.first() returns None on empty tables and an object when rows exist."""
+    assert await Hero.objects.first() is None
+
+    hero_a = await Hero.objects.create(name="First A", secret_name="FA", age=21)
+    hero_b = await Hero.objects.create(name="First B", secret_name="FB", age=22)
+
+    first = await Hero.objects.first()
+    assert first is not None
+    assert first.id in {hero_a.id, hero_b.id}
+
+
+async def test_manager_one_behavior():
+    """Manager.one() handles empty, single-row, and multi-row result sets."""
+    with pytest.raises(DoesNotExist):
+        await Hero.objects.one()
+
+    only_hero = await Hero.objects.create(name="Only Hero", secret_name="OH", age=31)
+    result = await Hero.objects.one()
+    assert result.id == only_hero.id
+
+    await Hero.objects.create(name="Another Hero", secret_name="AH", age=32)
+    with pytest.raises(MultipleObjectsReturned):
+        await Hero.objects.one()
+
+
+async def test_manager_one_or_none_behavior():
+    """Manager.one_or_none() returns None/row and raises on multi-row result sets."""
+    assert await Hero.objects.one_or_none() is None
+
+    only_hero = await Hero.objects.create(name="Only For OON", secret_name="OON", age=27)
+    result = await Hero.objects.one_or_none()
+    assert result is not None
+    assert result.id == only_hero.id
+
+    await Hero.objects.create(name="Second For OON", secret_name="SOON", age=28)
+    with pytest.raises(MultipleObjectsReturned):
+        await Hero.objects.one_or_none()
+
+
+async def test_manager_limit_and_offset():
+    """Manager.limit()/offset() produce bounded result sets."""
+    await Hero.objects.create(name="Limit 1", secret_name="L1", age=10)
+    await Hero.objects.create(name="Limit 2", secret_name="L2", age=20)
+    await Hero.objects.create(name="Limit 3", secret_name="L3", age=30)
+
+    limited = await Hero.objects.limit(2).all()
+    offset = await Hero.objects.offset(1).all()
+
+    assert len(limited) == 2
+    assert len(offset) == 2
+
+
+async def test_query_first_limit_offset_with_ordering():
+    """Query.first()/limit()/offset() work predictably when ordered."""
+    await Hero.objects.create(name="Ordered 1", secret_name="O1", age=40)
+    await Hero.objects.create(name="Ordered 2", secret_name="O2", age=20)
+    await Hero.objects.create(name="Ordered 3", secret_name="O3", age=30)
+
+    ordered_query = Hero.objects.filter().order_by(Hero.age)
+    first = await ordered_query.first()
+    limited = await ordered_query.limit(2).all()
+    offset = await ordered_query.offset(1).all()
+
+    assert first is not None
+    assert first.age == 20
+    assert [hero.age for hero in limited] == [20, 30]
+    assert [hero.age for hero in offset] == [30, 40]
+
+
+async def test_query_one_one_or_none_and_get():
+    """Query.one()/one_or_none()/get() follow documented single-row semantics."""
+    await Hero.objects.create(name="Query Solo", secret_name="QS", age=35)
+    await Hero.objects.create(name="Query Multi", secret_name="QM1", age=50)
+    await Hero.objects.create(name="Query Multi", secret_name="QM2", age=51)
+
+    one = await Hero.objects.filter(name="Query Solo").one()
+    assert one.secret_name == "QS"
+
+    maybe_one = await Hero.objects.filter(name="Query Solo").one_or_none()
+    assert maybe_one is not None
+    assert maybe_one.id == one.id
+
+    none_result = await Hero.objects.filter(name="Missing Query Hero").one_or_none()
+    assert none_result is None
+
+    with pytest.raises(DoesNotExist):
+        await Hero.objects.filter(name="Missing Query Hero").one()
+
+    with pytest.raises(MultipleObjectsReturned):
+        await Hero.objects.filter(name="Query Multi").one()
+
+    with pytest.raises(MultipleObjectsReturned):
+        await Hero.objects.filter(name="Query Multi").one_or_none()
+
+    fetched = await Hero.objects.filter(Hero.age >= 35).get(name="Query Solo")
+    assert fetched.id == one.id
 
 
 async def test_count_heroes():
@@ -192,7 +318,6 @@ async def test_delete_hero():
 async def test_update_instance():
     """Test updating a hero instance directly."""
     hero = await Hero.objects.create(name="Updater", secret_name="Original", age=10)
-    hero_id = hero.id
 
     hero.name = "Updated Updater"
     hero.age = 11
@@ -201,7 +326,7 @@ async def test_update_instance():
     updated_hero = await Hero.objects.get(id=hero.id)
     assert updated_hero.name == "Updated Updater"
     assert updated_hero.age == 11
-    assert updated_hero.secret_name == "Original" # Should remain unchanged
+    assert updated_hero.secret_name == "Original"  # Should remain unchanged
     assert await Hero.objects.count() == 1
 
 
@@ -262,7 +387,47 @@ async def test_update_all_records():
     assert final_count == total_heroes
 
 
-async def test_create_with_relationship():
+async def test_delete_with_filter():
+    """Test deleting records matching a filter."""
+    await Hero.objects.create(name="Delete A", secret_name="DA", age=10)
+    await Hero.objects.create(name="Delete B", secret_name="DB", age=10)
+    await Hero.objects.create(name="Keep C", secret_name="KC", age=30)
+
+    deleted_count = await Hero.objects.filter(age=10).delete()
+
+    assert deleted_count == 2
+    assert await Hero.objects.count() == 1
+    survivor = await Hero.objects.get(name="Keep C")
+    assert survivor.age == 30
+
+
+async def test_delete_all_records_via_manager():
+    """Test deleting all records through manager delete()."""
+    await Hero.objects.create(name="Delete All 1", secret_name="D1", age=10)
+    await Hero.objects.create(name="Delete All 2", secret_name="D2", age=20)
+
+    deleted_count = await Hero.objects.delete()
+
+    assert deleted_count == 2
+    assert await Hero.objects.count() == 0
+
+
+async def test_bulk_create():
+    """Manager.bulk_create() inserts all provided model instances."""
+    heroes = [
+        Hero(name="Bulk 1", secret_name="B1", age=18),
+        Hero(name="Bulk 2", secret_name="B2", age=19),
+        Hero(name="Bulk 3", secret_name="B3", age=20),
+    ]
+
+    created = await Hero.objects.bulk_create(heroes)
+
+    assert len(created) == 3
+    assert all(hero.id is not None for hero in created)
+    assert await Hero.objects.count() == 3
+
+
+async def test_create_with_relationship(session_mode: SessionMode):
     """Test creating objects with relationships."""
     team = await Team.objects.create(name="Test Team", headquarters="Test HQ")
     assert team.id is not None
@@ -272,10 +437,14 @@ async def test_create_with_relationship():
     assert hero.team_id == team.id
 
     retrieved_hero = await Hero.objects.get(id=hero.id)
-    retrieved_team = retrieved_hero.team
-    assert retrieved_team is not None
-    assert retrieved_team.id == team.id
-    assert retrieved_team.name == "Test Team"
+    if session_mode is SessionMode.AUTO_SESSION:
+        with pytest.raises(DetachedInstanceError):
+            _ = retrieved_hero.team
+    else:
+        retrieved_team = retrieved_hero.team
+        assert retrieved_team is not None
+        assert retrieved_team.id == team.id
+        assert retrieved_team.name == "Test Team"
 
 
 async def test_filter_by_relationship():
@@ -292,7 +461,7 @@ async def test_filter_by_relationship():
     assert team_one_heroes[1].name == "Hero 3"
 
 
-async def test_join_with_relationship():
+async def test_join_with_relationship(session_mode: SessionMode):
     """Test joining models and filtering across relationships."""
     team_alpha = await Team.objects.create(name="Team Alpha", headquarters="Alpha HQ")
     team_beta = await Team.objects.create(name="Team Beta", headquarters="Beta HQ")
@@ -308,23 +477,28 @@ async def test_join_with_relationship():
     names = sorted([h.name for h in heroes_from_alpha_team])
     assert names == ["Hero A", "Hero C"]
 
-    # Verify that the joined relationship is loaded
-    for hero in heroes_from_alpha_team:
-        assert hero.team.name == "Team Alpha"
+    if session_mode is SessionMode.AUTO_SESSION:
+        with pytest.raises(DetachedInstanceError):
+            for hero in heroes_from_alpha_team:
+                assert hero.team.name == "Team Alpha"
+    else:
+        for hero in heroes_from_alpha_team:
+            assert hero.team.name == "Team Alpha"
 
 
-@pytest.mark.parametrize("commit,team_count", [(True, 1), (False, 0)])
-async def test_unique_constraint(db_session, commit, team_count):
+@pytest.mark.parametrize("commit", [True, False])
+async def test_unique_constraint(session_mode: SessionMode, commit: bool):
     """Test that unique constraints are enforced (e.g., Team name)."""
     await Team.objects.create(name="UniqueTeam", headquarters="HQ Unique")
     assert await Team.objects.count() == 1
-    if commit:
-        await db_session.commit()
+    if commit and session_mode is SessionMode.WITH_SESSION:
+        await get_session_from_context().commit()
 
     with pytest.raises(IntegrityError):
         await Team.objects.create(name="UniqueTeam", headquarters="HQ Duplicate Attempt")
 
-    assert await Team.objects.count() == team_count
+    expected_count = 1 if (session_mode is SessionMode.AUTO_SESSION or commit) else 0
+    assert await Team.objects.count() == expected_count
 
 @pytest.mark.asyncio
 async def test_create_hero_and_save():
@@ -334,7 +508,7 @@ async def test_create_hero_and_save():
     # 1. Create a Hero instance
     hero_name = "Test Hero"
     secret_identity = "Secret Test"
-    hero = await Hero(name=hero_name, secret_name=secret_identity, age=30).save()
+    await Hero(name=hero_name, secret_name=secret_identity, age=30).save()
 
     # 3. Verify the hero was saved by querying the database
     saved_hero = await Hero.objects.get(Hero.name == hero_name)

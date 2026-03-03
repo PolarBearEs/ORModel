@@ -1,10 +1,11 @@
-from collections.abc import Sequence
+from collections.abc import AsyncGenerator, Sequence
 from contextlib import asynccontextmanager
 
 # --- FastAPI Imports ---
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import Depends, FastAPI, HTTPException
 from fastapi import Query as FastAPIQuery
 from fastapi.responses import ORJSONResponse
+from sqlmodel import col
 
 # --- Import library components ---
 from ormodel import (
@@ -12,38 +13,21 @@ from ormodel import (
     MultipleObjectsReturned,  # Core ORM classes/exceptions
     ORModel,
     get_session,  # Library's session/init functions
-    get_session_from_context,
     init_database,
     shutdown_database,
 )
 
-# --- Import example-specific config loader ---
-try:
-    from .config import get_settings
-except ImportError:
-    try:
-        from examples.config import get_settings
-    except ImportError:
-        raise ImportError("Could not import get_settings from examples.config")
-# ---------------------------------------------
+from .config import get_settings
+from .models import Hero, Team
 
-# --- Import example models ---
-try:
-    from .models import Hero, Team
-except ImportError:
-    try:
-        from examples.models import Hero, Team
-    except ImportError:
-        raise ImportError("Could not import Hero, Team from examples.models")
-# -----------------------------
+SETTINGS = get_settings()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """Handles application startup and shutdown events."""
     print("--- [Lifespan] FastAPI app starting up... ---")
-    settings = get_settings()
-    init_database(database_url=settings.DATABASE_URL, echo_sql=settings.ECHO_SQL)
+    init_database(database_url=SETTINGS.DATABASE_URL, echo_sql=SETTINGS.ECHO_SQL)
     yield
     print("--- [Lifespan] FastAPI app shutting down... ---")
     await shutdown_database()
@@ -53,24 +37,13 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title="ORModel Example API", lifespan=lifespan, default_response_class=ORJSONResponse)
 
 
-@app.middleware("http")
-async def db_session_middleware(request: Request, call_next):
-    """
-    Manages the database session scope for each request.
-    The `get_session` context manager now handles commit and rollback automatically.
-    """
-    try:
-        # Simply wrap the request processing in the transactional context.
-        # If call_next() succeeds, get_session() commits.
-        # If call_next() raises an exception, get_session() rolls back.
-        async with get_session():
-            response = await call_next(request)
-        return response
-    except Exception as e:
-        # The exception was already handled (rolled back) by get_session,
-        # but we re-raise it so FastAPI can generate the appropriate
-        # HTTP error response.
-        raise e
+async def db_session_scope() -> AsyncGenerator[None, None]:
+    """Route-level DB session scope for endpoints that touch the database."""
+    async with get_session():
+        yield
+
+
+DB_ROUTE_DEPENDENCIES = [Depends(db_session_scope)]
 
 
 # --- API Request/Response Models (Inherit from ormodel.ORModel) ---
@@ -108,11 +81,10 @@ class TeamRead(ORModel):
 
 
 # --- API Endpoints ---
-# These endpoints remain unchanged, as they were already correctly using
-# the manager, which relies on the session provided by the middleware.
+# These endpoints use route-level DB session dependency.
 
 
-@app.post("/teams/", response_model=TeamRead, status_code=201)
+@app.post("/teams/", response_model=TeamRead, status_code=201, dependencies=DB_ROUTE_DEPENDENCIES)
 async def create_new_team(team_data: TeamCreate):
     """Creates a new team, handling potential duplicates."""
     team, created = await Team.objects.get_or_create(
@@ -123,14 +95,14 @@ async def create_new_team(team_data: TeamCreate):
     return team
 
 
-@app.get("/teams/", response_model=list[TeamRead])
+@app.get("/teams/", response_model=list[TeamRead], dependencies=DB_ROUTE_DEPENDENCIES)
 async def read_all_teams(skip: int = 0, limit: int = 100):
     """Reads all teams with pagination."""
     teams_seq = await Team.objects.all()
     return list(teams_seq)[skip : skip + limit]
 
 
-@app.post("/heroes/", response_model=HeroRead, status_code=201)
+@app.post("/heroes/", response_model=HeroRead, status_code=201, dependencies=DB_ROUTE_DEPENDENCIES)
 async def create_new_hero(hero_data: HeroCreate):
     """Creates a new hero."""
     try:
@@ -140,7 +112,7 @@ async def create_new_hero(hero_data: HeroCreate):
         raise HTTPException(status_code=400, detail=f"Error creating hero: {type(e).__name__}: {e}")
 
 
-@app.get("/heroes/", response_model=list[HeroRead])
+@app.get("/heroes/", response_model=list[HeroRead], dependencies=DB_ROUTE_DEPENDENCIES)
 async def read_all_heroes(
     skip: int = 0,
     limit: int = 100,
@@ -151,12 +123,12 @@ async def read_all_heroes(
     """Reads heroes with optional filtering and pagination."""
     query = Hero.objects.filter()  # Start with base query
     if name:
-        query = query.filter(Hero.name.ilike(f"%{name}%"))
+        query = query.filter(col(Hero.name).ilike(f"%{name}%"))
     if min_age is not None:
-        query = query.filter(Hero.age >= min_age)
+        query = query.filter(col(Hero.age) >= min_age)
     if team_name:
         # Use join based on relationship definition
-        query = query.join(Hero.team).filter(Team.name == team_name)
+        query = query.join(Hero.team).filter(col(Team.name) == team_name)
 
     # Fetch all filtered then slice (less efficient for large offsets)
     # For production, implement .offset().limit() in the Query class
@@ -165,7 +137,7 @@ async def read_all_heroes(
     return heroes
 
 
-@app.get("/heroes/{hero_id}", response_model=HeroRead)
+@app.get("/heroes/{hero_id}", response_model=HeroRead, dependencies=DB_ROUTE_DEPENDENCIES)
 async def read_single_hero(hero_id: int):
     """Reads a single hero by ID."""
     try:
@@ -177,10 +149,9 @@ async def read_single_hero(hero_id: int):
         raise HTTPException(status_code=500, detail="Internal server error: Multiple heroes found with same ID")
 
 
-@app.patch("/heroes/{hero_id}", response_model=HeroRead)
+@app.patch("/heroes/{hero_id}", response_model=HeroRead, dependencies=DB_ROUTE_DEPENDENCIES)
 async def update_single_hero(hero_id: int, hero_update: HeroUpdate):
     """Updates a hero by ID."""
-    session = get_session_from_context()
     try:
         hero = await Hero.objects.get(id=hero_id)
         update_data = hero_update.model_dump(exclude_unset=True)
@@ -198,7 +169,7 @@ async def update_single_hero(hero_id: int, hero_update: HeroUpdate):
         raise HTTPException(status_code=400, detail=f"Error updating hero: {type(e).__name__}: {e}")
 
 
-@app.delete("/heroes/{hero_id}", status_code=204)
+@app.delete("/heroes/{hero_id}", status_code=204, dependencies=DB_ROUTE_DEPENDENCIES)
 async def delete_single_hero(hero_id: int):
     """Deletes a hero by ID."""
     try:

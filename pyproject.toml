@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "ormodel"
 version = "0.3.1"
-description = "An async ORM using SQLModel with a Django-like query syntax."
+description = "An async ORM built on SQLModel with a manager/query API and automatic session handling."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { file = "LICENSE" }
@@ -23,7 +23,7 @@ classifiers = [
     "Topic :: Database",
 ]
 dependencies = [
-    "sqlmodel>=0.0.25",
+    "sqlmodel>=0.0.37",
 ]
 
 [project.urls]
