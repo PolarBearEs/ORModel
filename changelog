@@ -1,5 +1,23 @@
 ## Release Notes
 
+### 0.4.0 - 2026-03-03
+
+#### ✨ New Features
+
+- Added bulk delete support via `Query.delete()` and `Model.objects.delete()`.
+- Added a repository-pattern runnable example: `examples/repository_pattern.py`.
+
+#### 🐛 Improvements
+
+- Aligned filtering/docs around SQLModel-style expressions and exact-match keyword filters.
+- Improved `with_auto_session` behavior to avoid re-running methods when they raise internal `SessionContextError`.
+- Expanded method-level test coverage and unified manager tests across explicit-session and auto-session modes.
+- Added `ruff` and `mypy` checks to CI test workflow.
+- Updated `sqlmodel` minimum dependency to `>=0.0.37`.
+- Updated examples to use module-only imports (`python -m examples...`).
+
+---
+
 ### ✨ New Features
 
 - **Instance-level Operations:** Introduced `save()`, `delete()`, and `refresh()` methods directly on ORM model instances for intuitive data manipulation.
