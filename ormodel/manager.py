@@ -1,7 +1,7 @@
 import inspect
-from collections.abc import Callable, Sequence
+from collections.abc import Awaitable, Callable, Sequence
 from functools import wraps
-from typing import TYPE_CHECKING, Any, Generic, Self, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Concatenate, Generic, ParamSpec, Self, TypeVar, cast
 
 from sqlalchemy import func
 from sqlalchemy import update as sa_update
@@ -19,21 +19,25 @@ if TYPE_CHECKING:
 
 # Generic Type variable for the ORModel model
 ModelType = TypeVar("ModelType", bound="ORModel")
+P = ParamSpec("P")
+R = TypeVar("R")
 
 
-def with_auto_session(func: Callable) -> Callable:
+def with_auto_session(
+    func: Callable[Concatenate[Any, P], Awaitable[R]],
+) -> Callable[Concatenate[Any, P], Awaitable[R]]:
     """Decorator to automatically create a session if one doesn't exist in the context."""
 
     @wraps(func)
-    async def wrapper(self: Any, *args: Any, **kwargs: Any) -> Any:
+    async def wrapper(self: Any, *args: P.args, **kwargs: P.kwargs) -> R:
         try:
             get_session_from_context()
-            return await func(self, *args, **kwargs)
         except SessionContextError:
             async with get_session():
                 return await func(self, *args, **kwargs)
+        return await func(self, *args, **kwargs)
 
-    return wrapper
+    return cast(Callable[Concatenate[Any, P], Awaitable[R]], wrapper)
 
 
 class AutoSessionMetaclass(type):

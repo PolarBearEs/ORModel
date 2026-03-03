@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from sqlmodel import Field, Session, SQLModel, create_engine, select
 
 
@@ -8,17 +10,11 @@ class SuperHero(SQLModel, table=True):
     age: int | None = None
 
 
-sqlite_file_name = "database.db"
-sqlite_url = f"sqlite:///{sqlite_file_name}"
-
-engine = create_engine(sqlite_url, echo=True)
+def create_db_and_tables(engine):
+    SQLModel.metadata.create_all(engine, tables=[SuperHero.__table__])
 
 
-def create_db_and_tables():
-    SQLModel.metadata.create_all(engine)
-
-
-def create_heroes():
+def create_heroes(engine):
     hero_1 = SuperHero(name="Deadpond", secret_name="Dive Wilson")
     hero_2 = SuperHero(name="Spider-Boy", secret_name="Pedro Parqueador")
     hero_3 = SuperHero(name="Rusty-Man", secret_name="Tommy Sharp", age=48)
@@ -39,23 +35,23 @@ def create_heroes():
         session.commit()
 
 
-def select_heroes():
+def select_heroes(engine):
     with Session(engine) as session:
         statement = select(SuperHero).where(SuperHero.age >= 35).where(SuperHero.age < 40)
-        statement = select(SuperHero)
-        print(statement)
         results = session.exec(statement)
-        for hero in results:
-            print(hero)
+        return list(results)
 
 
-def main():
-    create_db_and_tables()
-    create_heroes()
-    select_heroes()
+def main(tmp_path: Path):
+    sqlite_url = f"sqlite:///{tmp_path / 'sqlmodel_test.db'}"
+    engine = create_engine(sqlite_url, echo=False)
+    create_db_and_tables(engine)
+    create_heroes(engine)
+    return select_heroes(engine)
 
 
-def test_sqlmodel():
-    main()
-
-
+def test_sqlmodel(tmp_path: Path):
+    heroes = main(tmp_path)
+    assert len(heroes) == 2
+    names = sorted(hero.name for hero in heroes)
+    assert names == ["Black Lion", "Dr. Weird"]

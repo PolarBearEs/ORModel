@@ -61,6 +61,12 @@ asyncio.run(main())
 - Manager/query methods can run without explicit `get_session()`; an automatic short-lived session is created when needed.
 - For web apps, use request-scoped `async with get_session()` middleware.
 
+### Session modes
+
+- Explicit session mode (`async with get_session()`): all ORM calls in the block share one session/transaction.
+- Auto-session mode (calling manager/query methods without an active context): each call gets its own short-lived session.
+- In auto-session mode, returned objects can be detached once the call ends. For relationship access after the call, prefer explicit session mode.
+
 ## API reference
 
 `Model.objects` is a `Manager`. Query-building methods return a `Query`, and execution methods are `async`.
