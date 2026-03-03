@@ -17,25 +17,8 @@ from ormodel import (
     shutdown_database,
 )
 
-# --- Import example-specific config loader ---
-try:
-    from .config import get_settings
-except ImportError:
-    try:
-        from examples.config import get_settings
-    except ImportError:
-        raise ImportError("Could not import get_settings from examples.config")
-# ---------------------------------------------
-
-# --- Import example models ---
-try:
-    from .models import Hero, Team
-except ImportError:
-    try:
-        from examples.models import Hero, Team
-    except ImportError:
-        raise ImportError("Could not import Hero, Team from examples.models")
-# -----------------------------
+from .config import get_settings
+from .models import Hero, Team
 
 SETTINGS = get_settings()
 

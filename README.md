@@ -188,14 +188,50 @@ async def db_session_middleware(request: Request, call_next):
         return await call_next(request)
 ```
 
+## Repository Pattern Example
+
+You can keep data access in repository classes and keep business logic in services.
+See the complete runnable example in:
+
+- `examples/repository_pattern.py`
+
+Minimal shape:
+
+```python
+class HeroRepository:
+    async def create(self, **data) -> Hero:
+        return await Hero.objects.create(**data)
+
+    async def list_adults(self) -> list[Hero]:
+        return list(await Hero.objects.filter(Hero.age >= 18).order_by(Hero.name).all())
+
+class HeroService:
+    def __init__(self, heroes: HeroRepository):
+        self.heroes = heroes
+
+    async def register(self, name: str, secret_name: str, age: int) -> Hero:
+        return await self.heroes.create(name=name, secret_name=secret_name, age=age)
+```
+
+Usage:
+
+```python
+async with database_context("sqlite+aiosqlite:///./example.db"):
+    async with get_session():
+        service = HeroService(HeroRepository())
+        await service.register("Flash", "Barry Allen", 28)
+```
+
 ## Commands (consistent `uv run` style)
 
 From repository root:
 
+- Run examples as modules (for example, `python -m examples.standalone`), not as direct files.
 - Run tests: `uv run pytest -v`
 - Run tests with coverage: `uv run pytest --cov=ormodel --cov-branch --cov-report=xml`
 - Run API example: `uv run python -m examples.api`
 - Run standalone example: `uv run python -m examples.standalone`
+- Run repository-pattern example: `uv run python -m examples.repository_pattern`
 - Run alembic in examples: `cd examples && uv run alembic upgrade head`
 
 ## Development notes
