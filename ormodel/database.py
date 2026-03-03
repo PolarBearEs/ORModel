@@ -21,7 +21,7 @@ db_session_context: contextvars.ContextVar[AsyncSession | None] = contextvars.Co
 
 
 def init_database(database_url: str, echo_sql: bool = False):
-    global _engine, _session_factory
+    global _engine, _session_factory, _is_shutdown
     if _engine is not None:
         logger.debug("Database already initialized. Skipping.")
         return
@@ -29,6 +29,7 @@ def init_database(database_url: str, echo_sql: bool = False):
     try:
         _engine = create_async_engine(database_url, echo=echo_sql, future=True, pool_pre_ping=True)
         _session_factory = async_sessionmaker(bind=_engine, class_=AsyncSession, expire_on_commit=False)
+        _is_shutdown = False
         logger.debug("Database initialized successfully (Engine ID: %s)", id(_engine))
     except Exception as e:
         logger.error("Error initializing database: %s", e, exc_info=True)

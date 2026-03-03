@@ -85,6 +85,25 @@ async def test_filter_chaining_no_session():
     assert result[0].secret_name == "One NS"
 
 
+async def test_independent_queries_do_not_share_state_no_session():
+    """Each query chain should remain independent from other chains."""
+    await Hero.objects.create(name="Immutable A", secret_name="One", age=10)
+    await Hero.objects.create(name="Immutable B", secret_name="Two", age=10)
+    await Hero.objects.create(name="Immutable A", secret_name="Three", age=30)
+
+    by_name = Hero.objects.filter(name="Immutable A")
+    by_age = Hero.objects.filter(age=10)
+
+    name_results = await by_name.all()
+    age_results = await by_age.all()
+
+    assert len(name_results) == 2
+    assert sorted(hero.secret_name for hero in name_results) == ["One", "Three"]
+
+    assert len(age_results) == 2
+    assert sorted(hero.secret_name for hero in age_results) == ["One", "Two"]
+
+
 async def test_count_heroes_no_session():
     """Test counting heroes without db_session fixture."""
     assert await Hero.objects.count() == 0
