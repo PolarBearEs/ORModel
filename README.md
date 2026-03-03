@@ -60,29 +60,74 @@ asyncio.run(main())
 - Manager/query methods can run without explicit `get_session()`; an automatic short-lived session is created when needed.
 - For web apps, use request-scoped `async with get_session()` middleware.
 
-## Query and manager API
+## API reference
 
-Common read/query calls:
+`Model.objects` is a `Manager`. Query-building methods return a `Query`, and execution methods are `async`.
 
-```python
-await Hero.objects.all()
-await Hero.objects.get(name="Flash")
-await Hero.objects.filter(Hero.age >= 18).order_by(Hero.id).all()
-await Hero.objects.filter(name="Flash").update(age=29)
-await Hero.objects.count()
-```
+### Manager (`Model.objects`)
 
-Write helpers:
+| Method | Returns | Notes |
+| --- | --- | --- |
+| `all()` | `Sequence[Model]` | Fetch all rows for model. |
+| `first()` | `Model | None` | First row or `None`. |
+| `one()` | `Model` | Exactly one row; raises on 0 or >1. |
+| `one_or_none()` | `Model | None` | `None` on 0 rows; raises on >1. |
+| `get(*expr, **filters)` | `Model` | Single row lookup; raises `DoesNotExist` / `MultipleObjectsReturned`. |
+| `filter(*expr, **filters)` | `Query[Model]` | Build filtered query. |
+| `order_by(*columns)` | `Query[Model]` | Build ordered query. |
+| `limit(n)` | `Query[Model]` | Build limited query. |
+| `offset(n)` | `Query[Model]` | Build offset query. |
+| `join(target)` | `Query[Model]` | Build joined query. |
+| `count()` | `int` | Count rows. |
+| `update(**values)` | `int` | Bulk update matching rows; returns affected row count. |
+| `create(**values)` | `Model` | Validate + insert + refresh one row. |
+| `get_or_create(defaults=None, **filters)` | `tuple[Model, bool]` | `(obj, created)`; creates if not found. |
+| `update_or_create(defaults=None, **filters)` | `tuple[Model, bool]` | `(obj, created)`; updates found row or creates new row. |
+| `delete(instance)` | `None` | Delete a specific instance (`await instance.delete()`). |
+| `bulk_create(list[Model])` | `list[Model]` | Insert many instances with `session.add_all`. |
 
-```python
-hero = await Hero.objects.create(name="Flash", secret_name="Barry")
-hero.age = 29
-await hero.save()
-await hero.delete()
+### Query (`Model.objects.filter(...)`)
 
-obj, created = await Hero.objects.get_or_create(name="Flash", defaults={"secret_name": "Barry"})
-obj, created = await Hero.objects.update_or_create(name="Flash", defaults={"age": 30})
-```
+| Method | Returns | Notes |
+| --- | --- | --- |
+| `filter(*expr, **filters)` | `Query[Model]` | Add `WHERE` clauses. |
+| `order_by(*columns)` | `Query[Model]` | Add ordering. |
+| `limit(n)` | `Query[Model]` | Add SQL `LIMIT`. |
+| `offset(n)` | `Query[Model]` | Add SQL `OFFSET`. |
+| `join(target)` | `Query[Model]` | Add SQL `JOIN`. |
+| `all()` | `Sequence[Model]` | Execute and return all rows. |
+| `first()` | `Model | None` | Execute and return first row. |
+| `one()` | `Model` | Execute expecting exactly one row. |
+| `one_or_none()` | `Model | None` | Execute expecting <=1 row. |
+| `get(*expr, **filters)` | `Model` | Shortcut for `filter(...).one()`. |
+| `count()` | `int` | Count matching rows. |
+| `update(**values)` | `int` | Bulk update matching rows. |
+
+### Model instance methods (`ORModel`)
+
+| Method | Returns | Notes |
+| --- | --- | --- |
+| `save()` | `Self` | Insert/update current instance and refresh it. |
+| `delete()` | `None` | Delete current instance. |
+
+### Database/session helpers
+
+| Function | Returns | Notes |
+| --- | --- | --- |
+| `init_database(database_url, echo_sql=False)` | `None` | Initialize engine + sessionmaker. |
+| `shutdown_database()` | `None` | Dispose engine and clear factory. |
+| `database_context(database_url, echo_sql=False)` | async context manager | Convenience wrapper for init/shutdown in scripts. |
+| `get_session()` | async context manager | Transaction scope: commit on success, rollback on error. |
+| `get_engine()` | `AsyncEngine` | Access initialized engine. |
+| `get_session_from_context()` | `AsyncSession` | Get current context session; raises if absent. |
+
+### Exceptions
+
+| Exception | When raised |
+| --- | --- |
+| `DoesNotExist` | A query expected one row and found none. |
+| `MultipleObjectsReturned` | A query expected one row and found more than one. |
+| `SessionContextError` | A session was required but none exists in context. |
 
 ## FastAPI integration pattern
 
@@ -106,14 +151,21 @@ async def db_session_scope() -> AsyncGenerator[None, None]:
     async with get_session():
         yield
 
-DB = [Depends(db_session_scope)]
-
-@app.get("/heroes", dependencies=DB)
+@app.get("/heroes", dependencies=[Depends(db_session_scope)])
 async def read_heroes():
     return await Hero.objects.all()
 ```
 
-If your app genuinely needs DB scope for every request, use middleware instead.
+If your app genuinely needs DB scope for every request, use middleware instead:
+
+```python
+from fastapi import Request
+
+@app.middleware("http")
+async def db_session_middleware(request: Request, call_next):
+    async with get_session():
+        return await call_next(request)
+```
 
 ## Commands (consistent `uv run` style)
 
