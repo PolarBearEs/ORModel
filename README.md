@@ -86,11 +86,12 @@ obj, created = await Hero.objects.update_or_create(name="Flash", defaults={"age"
 
 ## FastAPI integration pattern
 
-Use lifespan for DB lifecycle and middleware for request transaction scope:
+Use lifespan for DB lifecycle and a route-level dependency for DB transaction scope:
 
 ```python
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, Request
+from fastapi import Depends, FastAPI
 from ormodel import init_database, shutdown_database, get_session
 
 @asynccontextmanager
@@ -101,11 +102,18 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(lifespan=lifespan)
 
-@app.middleware("http")
-async def db_session_middleware(request: Request, call_next):
+async def db_session_scope() -> AsyncGenerator[None, None]:
     async with get_session():
-        return await call_next(request)
+        yield
+
+DB = [Depends(db_session_scope)]
+
+@app.get("/heroes", dependencies=DB)
+async def read_heroes():
+    return await Hero.objects.all()
 ```
+
+If your app genuinely needs DB scope for every request, use middleware instead.
 
 ## Commands (consistent `uv run` style)
 
