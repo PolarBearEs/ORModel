@@ -1,5 +1,7 @@
 # tests/test_database.py
 
+import os
+
 import pytest
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from sqlmodel.ext.asyncio.session import AsyncSession
@@ -8,7 +10,15 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from examples.models import Hero
 
 # Import the context manager we are testing
-from ormodel.database import get_session
+from ormodel import SessionContextError
+from ormodel.database import (
+    database_context,
+    get_engine,
+    get_session,
+    get_session_from_context,
+    init_database,
+    shutdown_database,
+)
 
 # Mark all tests in this module to use pytest-asyncio
 
@@ -61,3 +71,59 @@ async def test_get_session_rolls_back_on_error(db_session: AsyncSession, test_en
     # --- Step 2: Verify the object does NOT exist in a new session ---
     final_count = await Hero.objects.count()
     assert final_count == initial_count
+
+
+async def test_get_engine_returns_initialized_engine():
+    """get_engine() should return the initialized async engine."""
+    engine = get_engine()
+    assert isinstance(engine, AsyncEngine)
+
+
+async def test_get_session_from_context_raises_without_active_session():
+    """get_session_from_context() should fail when called outside get_session()."""
+    with pytest.raises(SessionContextError):
+        get_session_from_context()
+
+
+async def test_get_session_from_context_returns_current_session():
+    """get_session_from_context() should return the active session inside get_session()."""
+    async with get_session() as session:
+        current = get_session_from_context()
+        assert current is session
+
+
+async def test_shutdown_and_init_database_cycle():
+    """shutdown_database() should disable sessions until init_database() is called again."""
+    database_url = os.environ["DATABASE_URL"]
+
+    await shutdown_database()
+
+    with pytest.raises(RuntimeError, match="not initialized"):
+        async with get_session():
+            pass
+
+    init_database(database_url, echo_sql=False)
+    async with get_session() as session:
+        assert session is not None
+
+
+async def test_database_context_initializes_and_shuts_down(tmp_path):
+    """database_context() should initialize on enter and shutdown on exit."""
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'database_context.db'}"
+    default_database_url = os.environ["DATABASE_URL"]
+
+    await shutdown_database()
+    with pytest.raises(RuntimeError, match="not initialized"):
+        get_engine()
+
+    async with database_context(database_url, echo_sql=False):
+        engine = get_engine()
+        assert isinstance(engine, AsyncEngine)
+        async with get_session() as session:
+            assert get_session_from_context() is session
+
+    with pytest.raises(RuntimeError, match="not initialized"):
+        get_engine()
+
+    # Restore the default test DB initialization for any in-test follow-up usage.
+    init_database(default_database_url, echo_sql=False)
