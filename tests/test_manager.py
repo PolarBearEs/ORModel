@@ -86,6 +86,16 @@ async def test_filter_chaining():
     assert result[0].secret_name == "One"
 
 
+async def test_filter_with_greater_than_expression():
+    """Comparison filters should use SQL expression arguments."""
+    await Hero.objects.create(name="Junior", secret_name="J", age=17)
+    await Hero.objects.create(name="Senior", secret_name="S", age=30)
+    await Hero.objects.create(name="Veteran", secret_name="V", age=45)
+
+    heroes = await Hero.objects.filter(Hero.age > 18).order_by(Hero.age).all()
+    assert [hero.name for hero in heroes] == ["Senior", "Veteran"]
+
+
 async def test_count_heroes():
     """Test counting heroes."""
     assert await Hero.objects.count() == 0
@@ -254,6 +264,31 @@ async def test_update_all_records():
     assert updated_count == total_heroes
     final_count = await Hero.objects.filter(age=100).count()
     assert final_count == total_heroes
+
+
+async def test_delete_with_filter():
+    """Test deleting records matching a filter."""
+    await Hero.objects.create(name="Delete A", secret_name="DA", age=10)
+    await Hero.objects.create(name="Delete B", secret_name="DB", age=10)
+    await Hero.objects.create(name="Keep C", secret_name="KC", age=30)
+
+    deleted_count = await Hero.objects.filter(age=10).delete()
+
+    assert deleted_count == 2
+    assert await Hero.objects.count() == 1
+    survivor = await Hero.objects.get(name="Keep C")
+    assert survivor.age == 30
+
+
+async def test_delete_all_records_via_manager():
+    """Test deleting all records through manager delete()."""
+    await Hero.objects.create(name="Delete All 1", secret_name="D1", age=10)
+    await Hero.objects.create(name="Delete All 2", secret_name="D2", age=20)
+
+    deleted_count = await Hero.objects.delete()
+
+    assert deleted_count == 2
+    assert await Hero.objects.count() == 0
 
 
 async def test_create_with_relationship():

@@ -7,6 +7,7 @@ from sqlalchemy import func
 from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.elements import ColumnElement
+from sqlmodel import delete as sqlmodel_delete
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -112,14 +113,13 @@ class Query(Generic[ModelType], metaclass=AutoSessionMetaclass):
         return await self.filter(*args, **kwargs).one()
 
     def filter(self, *args: ColumnElement[bool], **kwargs: Any) -> Self:
-        """Filters query by SQLAlchemy expressions and keyword equality conditions."""
+        """Filters query by SQLAlchemy expressions and exact-match keyword conditions."""
         new_query = self._clone()
         conditions = list(args)
         for key, value in kwargs.items():
-            field_name = key.split("__")[0]
-            if not hasattr(self._model_cls, field_name):
-                raise AttributeError(f"'{self._model_cls.__name__}' has no attribute '{field_name}' for filtering")
-            attr = getattr(self._model_cls, field_name)
+            if not hasattr(self._model_cls, key):
+                raise AttributeError(f"'{self._model_cls.__name__}' has no attribute '{key}' for filtering")
+            attr = getattr(self._model_cls, key)
             conditions.append(attr == value)
         if conditions:
             new_query._statement = new_query._statement.where(*conditions)
@@ -138,6 +138,18 @@ class Query(Generic[ModelType], metaclass=AutoSessionMetaclass):
 
         session = self._get_session()
         result = await session.exec(update_stmt)
+        return result.rowcount
+
+    async def delete(self) -> int:
+        """Performs a bulk delete on all rows matching the current query filter."""
+        delete_stmt = sqlmodel_delete(self._model_cls)
+
+        where_clause = self._statement.whereclause
+        if where_clause is not None:
+            delete_stmt = delete_stmt.where(where_clause)
+
+        session = self._get_session()
+        result = await session.exec(delete_stmt)
         return result.rowcount
 
     async def count(self) -> int:
@@ -177,7 +189,7 @@ class Query(Generic[ModelType], metaclass=AutoSessionMetaclass):
 
 
 class Manager(Generic[ModelType], metaclass=AutoSessionMetaclass):
-    """Provides Django-style access to query operations for a model."""
+    """Provides SQLModel-style access to query operations for a model."""
 
     _DELEGATED_QUERY_METHODS = {
         "all",
@@ -285,9 +297,9 @@ class Manager(Generic[ModelType], metaclass=AutoSessionMetaclass):
                 except DoesNotExist:
                     raise create_exc from None
 
-    async def delete(self, instance: ModelType) -> None:
-        """Deletes a specific model instance."""
-        await instance.delete()
+    async def delete(self) -> int:
+        """Bulk-delete rows for this model (equivalent to an unfiltered delete)."""
+        return await self._query().delete()
 
     async def bulk_create(self, objs: list[ModelType]) -> list[ModelType]:
         """Performs bulk inserts using session.add_all()."""

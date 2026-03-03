@@ -84,6 +84,16 @@ async def test_filter_chaining_no_session():
     assert result[0].secret_name == "One NS"
 
 
+async def test_filter_with_greater_than_expression_no_session():
+    """Comparison filters should work without explicit session fixtures."""
+    await Hero.objects.create(name="Junior NS", secret_name="J NS", age=17)
+    await Hero.objects.create(name="Senior NS", secret_name="S NS", age=30)
+    await Hero.objects.create(name="Veteran NS", secret_name="V NS", age=45)
+
+    heroes = await Hero.objects.filter(Hero.age > 18).order_by(Hero.age).all()
+    assert [hero.name for hero in heroes] == ["Senior NS", "Veteran NS"]
+
+
 async def test_independent_queries_do_not_share_state_no_session():
     """Each query chain should remain independent from other chains."""
     await Hero.objects.create(name="Immutable A", secret_name="One", age=10)
@@ -272,6 +282,31 @@ async def test_update_all_records_no_session():
     assert updated_count == total_heroes
     final_count = await Hero.objects.filter(age=100).count()
     assert final_count == total_heroes
+
+
+async def test_delete_with_filter_no_session():
+    """Test deleting records matching a filter without db_session fixture."""
+    await Hero.objects.create(name="Delete A NS", secret_name="DA NS", age=10)
+    await Hero.objects.create(name="Delete B NS", secret_name="DB NS", age=10)
+    await Hero.objects.create(name="Keep C NS", secret_name="KC NS", age=30)
+
+    deleted_count = await Hero.objects.filter(age=10).delete()
+
+    assert deleted_count == 2
+    assert await Hero.objects.count() == 1
+    survivor = await Hero.objects.get(name="Keep C NS")
+    assert survivor.age == 30
+
+
+async def test_delete_all_records_via_manager_no_session():
+    """Test deleting all records through manager delete() without db_session fixture."""
+    await Hero.objects.create(name="Delete All 1 NS", secret_name="D1 NS", age=10)
+    await Hero.objects.create(name="Delete All 2 NS", secret_name="D2 NS", age=20)
+
+    deleted_count = await Hero.objects.delete()
+
+    assert deleted_count == 2
+    assert await Hero.objects.count() == 0
 
 
 async def test_create_with_relationship_no_session():

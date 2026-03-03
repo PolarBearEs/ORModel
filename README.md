@@ -2,13 +2,14 @@
 
 [![codecov](https://codecov.io/github/PolarBearEs/ORModel/graph/badge.svg?token=XOGU4WU6CO)](https://codecov.io/github/PolarBearEs/ORModel)
 
-Async ORM utilities on top of `sqlmodel` with a Django-like manager API (`Model.objects`) and automatic session handling.
+Async ORM utilities on top of `sqlmodel` with a `Model.objects` manager API and automatic session handling.
 
 ## What you get
 
 - `ORModel` base class for models.
 - `Model.objects` manager for query + write operations.
 - Async session helpers: `init_database`, `shutdown_database`, `database_context`, `get_session`.
+- SQLModel/SQLAlchemy-native filtering with expressions like `Hero.objects.filter(Hero.age >= 18)`.
 - Query chaining (`filter`, `order_by`, `join`, `limit`, `offset`) with immutable query objects.
 - Auto-session wrapping for manager/query execution methods when no session exists in context.
 
@@ -54,7 +55,7 @@ asyncio.run(main())
 ## Session model
 
 - `init_database(...)` initializes the async engine/sessionmaker once per process.
-- `get_session()` manages transaction scope:
+- `get_session()` is the async DB session context manager built on SQLModel/SQLAlchemy `AsyncSession`, and manages transaction scope:
   - commit on success
   - rollback on exception
 - Manager/query methods can run without explicit `get_session()`; an automatic short-lived session is created when needed.
@@ -69,9 +70,9 @@ asyncio.run(main())
 | Method | Returns | Notes |
 | --- | --- | --- |
 | `all()` | `Sequence[Model]` | Fetch all rows for model. |
-| `first()` | `Model | None` | First row or `None`. |
+| `first()` | `Model \| None` | First row or `None`. |
 | `one()` | `Model` | Exactly one row; raises on 0 or >1. |
-| `one_or_none()` | `Model | None` | `None` on 0 rows; raises on >1. |
+| `one_or_none()` | `Model \| None` | `None` on 0 rows; raises on >1. |
 | `get(*expr, **filters)` | `Model` | Single row lookup; raises `DoesNotExist` / `MultipleObjectsReturned`. |
 | `filter(*expr, **filters)` | `Query[Model]` | Build filtered query. |
 | `order_by(*columns)` | `Query[Model]` | Build ordered query. |
@@ -83,25 +84,39 @@ asyncio.run(main())
 | `create(**values)` | `Model` | Validate + insert + refresh one row. |
 | `get_or_create(defaults=None, **filters)` | `tuple[Model, bool]` | `(obj, created)`; creates if not found. |
 | `update_or_create(defaults=None, **filters)` | `tuple[Model, bool]` | `(obj, created)`; updates found row or creates new row. |
-| `delete(instance)` | `None` | Delete a specific instance (`await instance.delete()`). |
+| `delete()` | `int` | Bulk-delete all rows for this model. |
 | `bulk_create(list[Model])` | `list[Model]` | Insert many instances with `session.add_all`. |
 
 ### Query (`Model.objects.filter(...)`)
 
 | Method | Returns | Notes |
 | --- | --- | --- |
-| `filter(*expr, **filters)` | `Query[Model]` | Add `WHERE` clauses. |
+| `filter(*expr, **filters)` | `Query[Model]` | Add `WHERE` clauses (`*expr` for SQL expressions, `**filters` for exact field equality only). |
 | `order_by(*columns)` | `Query[Model]` | Add ordering. |
 | `limit(n)` | `Query[Model]` | Add SQL `LIMIT`. |
 | `offset(n)` | `Query[Model]` | Add SQL `OFFSET`. |
 | `join(target)` | `Query[Model]` | Add SQL `JOIN`. |
 | `all()` | `Sequence[Model]` | Execute and return all rows. |
-| `first()` | `Model | None` | Execute and return first row. |
+| `first()` | `Model \| None` | Execute and return first row. |
 | `one()` | `Model` | Execute expecting exactly one row. |
-| `one_or_none()` | `Model | None` | Execute expecting <=1 row. |
+| `one_or_none()` | `Model \| None` | Execute expecting <=1 row. |
 | `get(*expr, **filters)` | `Model` | Shortcut for `filter(...).one()`. |
 | `count()` | `int` | Count matching rows. |
 | `update(**values)` | `int` | Bulk update matching rows. |
+| `delete()` | `int` | Bulk delete matching rows. |
+
+Comparison filters use SQL expressions:
+
+```python
+adults = await Hero.objects.filter(Hero.age > 18).all()
+teens = await Hero.objects.filter(Hero.age >= 13, Hero.age < 20).all()
+```
+
+Keyword filters remain exact-match only:
+
+```python
+exact_18 = await Hero.objects.filter(age=18).all()
+```
 
 ### Model instance methods (`ORModel`)
 
