@@ -1,9 +1,8 @@
 import pytest
-from sqlmodel import select # Added for tests that use direct select
+from sqlmodel import select
 
 from examples.models import Hero
 from ormodel import get_session
-from ormodel.manager import Query as ORModelQuery # Added for tests that use direct Query
 
 
 async def test_manual_session_commits_on_success():

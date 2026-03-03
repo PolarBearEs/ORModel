@@ -1,17 +1,20 @@
 import inspect
 from collections.abc import Callable, Sequence
 from functools import wraps
-from typing import Any, Generic, Self, TypeVar, cast
+from typing import TYPE_CHECKING, Any, Generic, Self, TypeVar, cast
 
 from sqlalchemy import func
 from sqlalchemy import update as sa_update
 from sqlalchemy.exc import IntegrityError
-from sqlalchemy.sql.elements import BinaryExpression
+from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import select
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from .database import get_session, get_session_from_context
 from .exceptions import DoesNotExist, MultipleObjectsReturned, SessionContextError
+
+if TYPE_CHECKING:
+    from .base import ORModel
 
 # Generic Type variable for the ORModel model
 ModelType = TypeVar("ModelType", bound="ORModel")
@@ -104,11 +107,11 @@ class Query(Generic[ModelType], metaclass=AutoSessionMetaclass):
             raise MultipleObjectsReturned(f"Expected one result for {self._model_cls.__name__}, but found {count}")
         return all_results[0]
 
-    async def get(self, *args: BinaryExpression, **kwargs: Any) -> ModelType:
+    async def get(self, *args: ColumnElement[bool], **kwargs: Any) -> ModelType:
         """Retrieves a single object matching the criteria (applied via filter)."""
         return await self.filter(*args, **kwargs).one()
 
-    def filter(self, *args: BinaryExpression, **kwargs: Any) -> Self:
+    def filter(self, *args: ColumnElement[bool], **kwargs: Any) -> Self:
         """Filters query by SQLAlchemy expressions and keyword equality conditions."""
         new_query = self._clone()
         conditions = list(args)
@@ -139,9 +142,8 @@ class Query(Generic[ModelType], metaclass=AutoSessionMetaclass):
 
     async def count(self) -> int:
         """Returns the count of objects matching the query."""
-        pk_col = getattr(self._model_cls, self._model_cls.__mapper__.primary_key[0].name)
         where_clause = self._statement.whereclause
-        count_statement = select(func.count(pk_col)).select_from(self._model_cls)
+        count_statement = select(func.count()).select_from(self._model_cls)
         if where_clause is not None:
             count_statement = count_statement.where(where_clause)
 
@@ -204,7 +206,7 @@ class Manager(Generic[ModelType], metaclass=AutoSessionMetaclass):
             return getattr(self._query(), name)
         raise AttributeError(f"'{self.__class__.__name__}' object has no attribute '{name}'")
 
-    def filter(self, *args: BinaryExpression, **kwargs: Any) -> Query[ModelType]:
+    def filter(self, *args: ColumnElement[bool], **kwargs: Any) -> Query[ModelType]:
         """Start a filtering query."""
         return self._query().filter(*args, **kwargs)
 

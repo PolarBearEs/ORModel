@@ -5,6 +5,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, HTTPException, Request
 from fastapi import Query as FastAPIQuery
 from fastapi.responses import ORJSONResponse
+from sqlmodel import col
 
 # --- Import library components ---
 from ormodel import (
@@ -12,7 +13,6 @@ from ormodel import (
     MultipleObjectsReturned,  # Core ORM classes/exceptions
     ORModel,
     get_session,  # Library's session/init functions
-    get_session_from_context,
     init_database,
     shutdown_database,
 )
@@ -151,12 +151,12 @@ async def read_all_heroes(
     """Reads heroes with optional filtering and pagination."""
     query = Hero.objects.filter()  # Start with base query
     if name:
-        query = query.filter(Hero.name.ilike(f"%{name}%"))
+        query = query.filter(col(Hero.name).ilike(f"%{name}%"))
     if min_age is not None:
-        query = query.filter(Hero.age >= min_age)
+        query = query.filter(col(Hero.age) >= min_age)
     if team_name:
         # Use join based on relationship definition
-        query = query.join(Hero.team).filter(Team.name == team_name)
+        query = query.join(Hero.team).filter(col(Team.name) == team_name)
 
     # Fetch all filtered then slice (less efficient for large offsets)
     # For production, implement .offset().limit() in the Query class
@@ -180,7 +180,6 @@ async def read_single_hero(hero_id: int):
 @app.patch("/heroes/{hero_id}", response_model=HeroRead)
 async def update_single_hero(hero_id: int, hero_update: HeroUpdate):
     """Updates a hero by ID."""
-    session = get_session_from_context()
     try:
         hero = await Hero.objects.get(id=hero_id)
         update_data = hero_update.model_dump(exclude_unset=True)

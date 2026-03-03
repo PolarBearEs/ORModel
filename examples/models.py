@@ -1,6 +1,6 @@
-# Import the base ORModel from YOUR library using the NEW name
-from ormodel import ORModel
 from sqlmodel import Field, Relationship
+
+from ormodel import ORModel
 
 
 # Example Model 1

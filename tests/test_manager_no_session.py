@@ -5,13 +5,12 @@ from sqlalchemy.orm.exc import DetachedInstanceError
 
 from examples.models import Hero, Team
 from ormodel import DoesNotExist, MultipleObjectsReturned
-from ormodel.manager import Query as ORModelQuery
 
 
 # Mark all tests in this module to use pytest-asyncio
 async def test_get_session_isnot_imported() -> None:
     with pytest.raises(NameError):
-        get_session()
+        eval("get_session()")
 
 async def test_create_hero_no_session():
     """Test creating a single Hero object without db_session fixture."""
@@ -119,7 +118,9 @@ async def test_count_heroes_no_session():
 
 async def test_get_or_create_does_not_exist_no_session():
     """Test get_or_create when the object doesn't exist without db_session fixture."""
-    hero, created = await Hero.objects.get_or_create(name="New Hero NS", defaults={"secret_name": "Secret NS", "age": 22})
+    hero, created = await Hero.objects.get_or_create(
+        name="New Hero NS", defaults={"secret_name": "Secret NS", "age": 22}
+    )
     assert created is True
     assert hero.id is not None
     assert hero.name == "New Hero NS"
@@ -213,7 +214,7 @@ async def test_update_instance_no_session():
     updated_hero = await Hero.objects.get(id=hero.id)
     assert updated_hero.name == "Updated Updater NS"
     assert updated_hero.age == 11
-    assert updated_hero.secret_name == "Original NS" # Should remain unchanged
+    assert updated_hero.secret_name == "Original NS"  # Should remain unchanged
 
 
 async def test_update_single_field_no_session():

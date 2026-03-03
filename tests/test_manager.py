@@ -1,15 +1,10 @@
 # tests/test_manager.py
 import pytest
-from sqlalchemy.exc import IntegrityError  # To test unique constraints
-from sqlmodel.ext.asyncio.session import AsyncSession # Added for db_session fixture
+from sqlalchemy.exc import IntegrityError
+from sqlmodel.ext.asyncio.session import AsyncSession
 
-# Import models used for testing
-from examples.models import Hero, Team  # Adjust import path if needed
-
-# Import your library's exceptions and base model
+from examples.models import Hero, Team
 from ormodel import DoesNotExist, MultipleObjectsReturned
-from ormodel.manager import Query as ORModelQuery # Added for test_update_without_auto_session_wrapper and test_query_all_direct
-
 
 # Mark all tests in this module to use pytest-asyncio
 
@@ -192,7 +187,6 @@ async def test_delete_hero():
 async def test_update_instance():
     """Test updating a hero instance directly."""
     hero = await Hero.objects.create(name="Updater", secret_name="Original", age=10)
-    hero_id = hero.id
 
     hero.name = "Updated Updater"
     hero.age = 11
@@ -201,7 +195,7 @@ async def test_update_instance():
     updated_hero = await Hero.objects.get(id=hero.id)
     assert updated_hero.name == "Updated Updater"
     assert updated_hero.age == 11
-    assert updated_hero.secret_name == "Original" # Should remain unchanged
+    assert updated_hero.secret_name == "Original"  # Should remain unchanged
     assert await Hero.objects.count() == 1
 
 
@@ -334,7 +328,7 @@ async def test_create_hero_and_save():
     # 1. Create a Hero instance
     hero_name = "Test Hero"
     secret_identity = "Secret Test"
-    hero = await Hero(name=hero_name, secret_name=secret_identity, age=30).save()
+    await Hero(name=hero_name, secret_name=secret_identity, age=30).save()
 
     # 3. Verify the hero was saved by querying the database
     saved_hero = await Hero.objects.get(Hero.name == hero_name)

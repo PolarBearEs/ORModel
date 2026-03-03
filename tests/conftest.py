@@ -1,7 +1,7 @@
 # tests/conftest.py
 
 import asyncio
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Generator
 
 import pytest
 import pytest_asyncio
@@ -122,7 +122,7 @@ def init_library_for_test(test_engine: AsyncEngine):
 
 # --- Fixture providing the FastAPI app ---
 @pytest.fixture(scope="function")
-def app() -> FastAPI:
+def app() -> Generator[FastAPI, None, None]:
     """Fixture providing the FastAPI app instance."""
     if fastapi_app is None:
         pytest.fail("FastAPI app could not be imported.")
