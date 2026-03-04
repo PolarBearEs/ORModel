@@ -1,4 +1,5 @@
 import sqlmodel as _sqlmodel
+from sqlmodel import *  # noqa: F403
 
 from .base import ORModel, get_defined_models
 from .database import (
@@ -15,11 +16,11 @@ from .manager import Manager, Query
 
 metadata = ORModel.metadata
 
-for _name in getattr(_sqlmodel, "__all__", ()):
-    globals()[_name] = getattr(_sqlmodel, _name)
+# Re-export based on what from sqlmodel import * actually does
+_sqlmodel_reexports = getattr(_sqlmodel, "__all__", [n for n in dir(_sqlmodel) if not n.startswith("_")])
 
 __all__ = [
-    *getattr(_sqlmodel, "__all__", ()),
+    *_sqlmodel_reexports,
     "ORModel",
     "get_defined_models",
     "database_context",
