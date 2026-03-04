@@ -1,4 +1,4 @@
-import sqlmodel as _sqlmodel
+from sqlmodel import *
 
 from .base import ORModel, get_defined_models
 from .database import (
@@ -15,11 +15,13 @@ from .manager import Manager, Query
 
 metadata = ORModel.metadata
 
-for _name in getattr(_sqlmodel, "__all__", ()):
-    globals()[_name] = getattr(_sqlmodel, _name)
+# We want to re-export everything from sqlmodel as well
+import sqlmodel as _sqlmodel
+
+_sqlmodel_public_names = [n for n in dir(_sqlmodel) if not n.startswith("_")]
 
 __all__ = [
-    *getattr(_sqlmodel, "__all__", ()),
+    *_sqlmodel_public_names,
     "ORModel",
     "get_defined_models",
     "database_context",
