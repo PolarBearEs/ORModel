@@ -144,7 +144,7 @@ async def test_init_database_raises_on_invalid_url():
         # Use an invalid protocol/URL that create_async_engine might fail on early or during factory setup
         # Note: some drivers only fail on actual connect, but we want to trigger the except block in init_database
         init_database("invalid://protocol")
-    
+
     # Restore for other tests
     init_database(os.environ["DATABASE_URL"])
 
@@ -160,22 +160,23 @@ async def test_shutdown_database_skips_if_already_shutdown():
 
 async def test_shutdown_database_logs_error_on_exception(monkeypatch):
     """shutdown_database() should catch and log exceptions during engine.dispose()."""
+
     # Create a mock engine with a dispose method that raises
     class MockEngine:
         async def dispose(self):
             raise Exception("Dispose error")
-            
+
     # We need to bypass the read-only nature of the real engine
     # So we replace the global _engine variable in the module
     import ormodel.database
-    
+
     mock_engine = MockEngine()
     monkeypatch.setattr(ormodel.database, "_engine", mock_engine)
     # Also need to set _is_shutdown to False so it tries to dispose
     monkeypatch.setattr(ormodel.database, "_is_shutdown", False)
-    
+
     # Should not raise, just log
     await shutdown_database()
-    
+
     # Restore for other tests (init_database will overwrite the mock)
     init_database(os.environ["DATABASE_URL"])

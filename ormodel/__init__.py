@@ -1,4 +1,5 @@
-from sqlmodel import *
+import sqlmodel as _sqlmodel
+from sqlmodel import *  # noqa: F403
 
 from .base import ORModel, get_defined_models
 from .database import (
@@ -16,8 +17,6 @@ from .manager import Manager, Query
 metadata = ORModel.metadata
 
 # We want to re-export everything from sqlmodel as well
-import sqlmodel as _sqlmodel
-
 _sqlmodel_public_names = [n for n in dir(_sqlmodel) if not n.startswith("_")]
 
 __all__ = [

@@ -500,6 +500,7 @@ async def test_unique_constraint(session_mode: SessionMode, commit: bool):
     expected_count = 1 if (session_mode is SessionMode.AUTO_SESSION or commit) else 0
     assert await Team.objects.count() == expected_count
 
+
 @pytest.mark.asyncio
 async def test_create_hero_and_save():
     """
@@ -541,7 +542,7 @@ async def test_create_rolls_back_on_error(session_mode: SessionMode):
     # We can simulate an error by trying to create a duplicate if there's a unique constraint
     # Team name is unique
     await Team.objects.create(name="Unique Team", headquarters="HQ")
-    
+
     # In WITH_SESSION mode, the first create is part of the current transaction.
     # The subsequent failing create will trigger a rollback on the session,
     # which would rollback the first create too if we don't commit it now.
@@ -565,7 +566,7 @@ async def test_get_or_create_race_condition(monkeypatch):
 
     original_get = Hero.objects.get
     original_create = Hero.objects.create
-    
+
     call_count_get = 0
 
     async def mock_get(*args, **kwargs):
@@ -602,7 +603,7 @@ async def test_update_or_create_race_condition(monkeypatch):
 
     original_get = Hero.objects.get
     original_create = Hero.objects.create
-    
+
     call_count_get = 0
 
     async def mock_get(*args, **kwargs):
@@ -621,8 +622,7 @@ async def test_update_or_create_race_condition(monkeypatch):
     monkeypatch.setattr(Hero.objects, "create", mock_create)
 
     hero, created = await Hero.objects.update_or_create(
-        name="Race Update", 
-        defaults={"secret_name": "Racer", "age": 30}
+        name="Race Update", defaults={"secret_name": "Racer", "age": 30}
     )
 
     assert created is False
@@ -635,6 +635,7 @@ async def test_get_or_create_integrity_error_persistent(monkeypatch):
     Test get_or_create where create raises IntegrityError but the object is still not found.
     (e.g. constraint violation other than uniqueness, or instant deletion)
     """
+
     async def mock_get(*args, **kwargs):
         raise DoesNotExist("Mock DoesNotExist")
 
@@ -652,6 +653,7 @@ async def test_update_or_create_integrity_error_persistent(monkeypatch):
     """
     Test update_or_create where create raises IntegrityError but the object is still not found.
     """
+
     async def mock_get(*args, **kwargs):
         raise DoesNotExist("Mock DoesNotExist")
 
