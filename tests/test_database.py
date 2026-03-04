@@ -127,3 +127,55 @@ async def test_database_context_initializes_and_shuts_down(tmp_path):
 
     # Restore the default test DB initialization for any in-test follow-up usage.
     init_database(default_database_url, echo_sql=False)
+
+
+async def test_init_database_skips_if_already_initialized():
+    """init_database() should skip initialization if an engine already exists."""
+    engine_before = get_engine()
+    init_database("sqlite+aiosqlite:///./some_other.db")
+    engine_after = get_engine()
+    assert engine_before is engine_after
+
+
+async def test_init_database_raises_on_invalid_url():
+    """init_database() should raise RuntimeError on invalid URL."""
+    await shutdown_database()
+    with pytest.raises(RuntimeError, match="Failed to initialize database"):
+        # Use an invalid protocol/URL that create_async_engine might fail on early or during factory setup
+        # Note: some drivers only fail on actual connect, but we want to trigger the except block in init_database
+        init_database("invalid://protocol")
+    
+    # Restore for other tests
+    init_database(os.environ["DATABASE_URL"])
+
+
+async def test_shutdown_database_skips_if_already_shutdown():
+    """shutdown_database() should return early if already shut down."""
+    await shutdown_database()
+    # Calling it again should not raise anything and just return
+    await shutdown_database()
+    # Restore for other tests
+    init_database(os.environ["DATABASE_URL"])
+
+
+async def test_shutdown_database_logs_error_on_exception(monkeypatch):
+    """shutdown_database() should catch and log exceptions during engine.dispose()."""
+    # Create a mock engine with a dispose method that raises
+    class MockEngine:
+        async def dispose(self):
+            raise Exception("Dispose error")
+            
+    # We need to bypass the read-only nature of the real engine
+    # So we replace the global _engine variable in the module
+    import ormodel.database
+    
+    mock_engine = MockEngine()
+    monkeypatch.setattr(ormodel.database, "_engine", mock_engine)
+    # Also need to set _is_shutdown to False so it tries to dispose
+    monkeypatch.setattr(ormodel.database, "_is_shutdown", False)
+    
+    # Should not raise, just log
+    await shutdown_database()
+    
+    # Restore for other tests (init_database will overwrite the mock)
+    init_database(os.environ["DATABASE_URL"])
