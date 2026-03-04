@@ -16,11 +16,11 @@ from .manager import Manager, Query
 
 metadata = ORModel.metadata
 
-# We want to re-export everything from sqlmodel as well
-_sqlmodel_public_names = [n for n in dir(_sqlmodel) if not n.startswith("_")]
+# Re-export based on what from sqlmodel import * actually does
+_sqlmodel_reexports = getattr(_sqlmodel, "__all__", [n for n in dir(_sqlmodel) if not n.startswith("_")])
 
 __all__ = [
-    *_sqlmodel_public_names,
+    *_sqlmodel_reexports,
     "ORModel",
     "get_defined_models",
     "database_context",
