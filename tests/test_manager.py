@@ -518,3 +518,148 @@ async def test_create_hero_and_save():
     assert saved_hero.secret_name == secret_identity
     assert saved_hero.id is not None
     assert saved_hero.age == 30
+
+
+async def test_filter_raises_attribute_error_on_invalid_field():
+    """Test that filter raises AttributeError when filtering by a non-existent field."""
+    with pytest.raises(AttributeError, match="has no attribute 'invalid_field'"):
+        await Hero.objects.filter(invalid_field="value")
+
+
+async def test_one_raises_multiple_objects_returned_when_count_greater_than_one():
+    """Test that one() raises MultipleObjectsReturned when more than one object is found."""
+    await Hero.objects.create(name="Duplicate", secret_name="D1", age=20)
+    await Hero.objects.create(name="Duplicate", secret_name="D2", age=20)
+
+    # one() calls limit(2), so if 2 come back, it raises
+    with pytest.raises(MultipleObjectsReturned, match="Expected one result for Hero, but found 2"):
+        await Hero.objects.filter(name="Duplicate").one()
+
+
+async def test_create_rolls_back_on_error(session_mode: SessionMode):
+    """Test that create() rolls back the session on error."""
+    # We can simulate an error by trying to create a duplicate if there's a unique constraint
+    # Team name is unique
+    await Team.objects.create(name="Unique Team", headquarters="HQ")
+    
+    # In WITH_SESSION mode, the first create is part of the current transaction.
+    # The subsequent failing create will trigger a rollback on the session,
+    # which would rollback the first create too if we don't commit it now.
+    if session_mode == SessionMode.WITH_SESSION:
+        await get_session_from_context().commit()
+
+    with pytest.raises(IntegrityError):
+        await Team.objects.create(name="Unique Team", headquarters="Another HQ")
+
+    # Verify that the session is still usable or at least the DB is consistent
+    assert await Team.objects.count() == 1
+
+
+async def test_get_or_create_race_condition(monkeypatch):
+    """
+    Test the race condition where an object is created between get() and create() in get_or_create().
+    """
+    # 1. First get() raises DoesNotExist
+    # 2. create() raises IntegrityError (simulating concurrent creation)
+    # 3. Second get() succeeds
+
+    original_get = Hero.objects.get
+    original_create = Hero.objects.create
+    
+    call_count_get = 0
+
+    async def mock_get(*args, **kwargs):
+        nonlocal call_count_get
+        call_count_get += 1
+        if call_count_get == 1:
+            raise DoesNotExist("Mock DoesNotExist")
+        return await original_get(*args, **kwargs)
+
+    async def mock_create(*args, **kwargs):
+        # Create the object properly so the next get succeeds
+        await original_create(*args, **kwargs)
+        # But raise IntegrityError to simulate it was created by "someone else"
+        raise IntegrityError("Mock IntegrityError", params={}, orig=Exception())
+
+    monkeypatch.setattr(Hero.objects, "get", mock_get)
+    monkeypatch.setattr(Hero.objects, "create", mock_create)
+
+    # Use a unique name to ensure clean state
+    hero, created = await Hero.objects.get_or_create(name="Race Hero", secret_name="Racer", age=25)
+
+    assert created is False
+    assert hero.name == "Race Hero"
+    assert call_count_get == 2
+
+
+async def test_update_or_create_race_condition(monkeypatch):
+    """
+    Test the race condition where an object is created between get() and create() in update_or_create().
+    """
+    # 1. First get() raises DoesNotExist
+    # 2. create() raises IntegrityError
+    # 3. Second get() succeeds
+
+    original_get = Hero.objects.get
+    original_create = Hero.objects.create
+    
+    call_count_get = 0
+
+    async def mock_get(*args, **kwargs):
+        nonlocal call_count_get
+        call_count_get += 1
+        if call_count_get == 1:
+            raise DoesNotExist("Mock DoesNotExist")
+        return await original_get(*args, **kwargs)
+
+    async def mock_create(*args, **kwargs):
+        # Create it so the retry get finds it
+        await original_create(*args, **kwargs)
+        raise IntegrityError("Mock IntegrityError", params={}, orig=Exception())
+
+    monkeypatch.setattr(Hero.objects, "get", mock_get)
+    monkeypatch.setattr(Hero.objects, "create", mock_create)
+
+    hero, created = await Hero.objects.update_or_create(
+        name="Race Update", 
+        defaults={"secret_name": "Racer", "age": 30}
+    )
+
+    assert created is False
+    assert hero.name == "Race Update"
+    assert call_count_get == 2
+
+
+async def test_get_or_create_integrity_error_persistent(monkeypatch):
+    """
+    Test get_or_create where create raises IntegrityError but the object is still not found.
+    (e.g. constraint violation other than uniqueness, or instant deletion)
+    """
+    async def mock_get(*args, **kwargs):
+        raise DoesNotExist("Mock DoesNotExist")
+
+    async def mock_create(*args, **kwargs):
+        raise IntegrityError("Mock IntegrityError", params={}, orig=Exception())
+
+    monkeypatch.setattr(Hero.objects, "get", mock_get)
+    monkeypatch.setattr(Hero.objects, "create", mock_create)
+
+    with pytest.raises(IntegrityError, match="Mock IntegrityError"):
+        await Hero.objects.get_or_create(name="Fail Hero", defaults={"age": 20})
+
+
+async def test_update_or_create_integrity_error_persistent(monkeypatch):
+    """
+    Test update_or_create where create raises IntegrityError but the object is still not found.
+    """
+    async def mock_get(*args, **kwargs):
+        raise DoesNotExist("Mock DoesNotExist")
+
+    async def mock_create(*args, **kwargs):
+        raise IntegrityError("Mock IntegrityError", params={}, orig=Exception())
+
+    monkeypatch.setattr(Hero.objects, "get", mock_get)
+    monkeypatch.setattr(Hero.objects, "create", mock_create)
+
+    with pytest.raises(IntegrityError, match="Mock IntegrityError"):
+        await Hero.objects.update_or_create(name="Fail Update", defaults={"age": 20})
