@@ -5,7 +5,7 @@ import os
 import pytest
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
-from sqlalchemy.pool import NullPool
+from sqlalchemy.pool import NullPool, StaticPool
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 # Import a model to use for testing
@@ -230,19 +230,36 @@ async def test_init_database_configures_sqlite_pragmas(tmp_path):
         init_database(default_database_url, echo_sql=False)
 
 
-@pytest.mark.parametrize(
-    "database_url",
-    [
-        "sqlite+aiosqlite:///:memory:",
-        "sqlite+aiosqlite:///file::memory:?cache=shared&uri=true",
-    ],
-)
-async def test_init_database_keeps_in_memory_sqlite_across_simultaneous_connections(database_url: str):
-    """In-memory SQLite should remain visible across simultaneous checked-out connections."""
+async def test_init_database_keeps_plain_in_memory_sqlite_on_static_pool():
+    """Plain in-memory SQLite should keep SQLAlchemy's StaticPool default."""
     default_database_url = os.environ["DATABASE_URL"]
 
     await shutdown_database()
-    init_database(database_url, echo_sql=False)
+    init_database("sqlite+aiosqlite:///:memory:", echo_sql=False)
+
+    try:
+        engine = get_engine()
+        assert isinstance(engine.sync_engine.pool, StaticPool)
+
+        async with engine.begin() as conn:
+            await conn.exec_driver_sql("CREATE TABLE example (id INTEGER PRIMARY KEY)")
+
+        async with engine.connect() as conn:
+            result = await conn.exec_driver_sql(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'example'"
+            )
+            assert result.scalar_one() == 1
+    finally:
+        await shutdown_database()
+        init_database(default_database_url, echo_sql=False)
+
+
+async def test_init_database_keeps_shared_memory_sqlite_across_simultaneous_connections():
+    """Shared-cache in-memory SQLite should remain visible across simultaneous connections."""
+    default_database_url = os.environ["DATABASE_URL"]
+
+    await shutdown_database()
+    init_database("sqlite+aiosqlite:///file::memory:?cache=shared&uri=true", echo_sql=False)
 
     try:
         engine = get_engine()
