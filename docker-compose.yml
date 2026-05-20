@@ -10,9 +10,6 @@ services:
     volumes:
       - .:/app
       - sqlite_data:/app/data
-    working_dir: /app
-    stdin_open: true
-    tty: true
 
 volumes:
   sqlite_data:
