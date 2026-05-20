@@ -72,6 +72,22 @@ async def test_read_teams_with_data(async_client: AsyncClient):
     assert names == ["Team A", "Team B"]
 
 
+async def test_read_teams_uses_database_pagination(async_client: AsyncClient):
+    """Team listing should page through rows using query offset/limit."""
+    for index in range(3):
+        response = await async_client.post(
+            "/teams/",
+            json={"name": f"Team {index}", "headquarters": f"HQ {index}"},
+        )
+        assert response.status_code == 201
+
+    response = await async_client.get("/teams/?skip=1&limit=1")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert [team["name"] for team in data] == ["Team 1"]
+
+
 # --- Test Hero Endpoints ---
 
 
@@ -136,6 +152,22 @@ async def test_read_heroes_with_data(async_client: AsyncClient):
     assert len(data) == 2
     names = sorted([h["name"] for h in data])
     assert names == ["Batman", "Superman"]
+
+
+async def test_read_heroes_uses_database_pagination(async_client: AsyncClient):
+    """Hero listing should page through filtered rows using query offset/limit."""
+    for index in range(4):
+        response = await async_client.post(
+            "/heroes/",
+            json={"name": f"Hero {index}", "secret_name": f"Secret {index}", "age": 20 + index},
+        )
+        assert response.status_code == 201
+
+    response = await async_client.get("/heroes/?min_age=21&skip=1&limit=1")
+
+    assert response.status_code == 200
+    data = response.json()
+    assert [hero["name"] for hero in data] == ["Hero 2"]
 
 
 async def test_read_single_hero_success(async_client: AsyncClient):
