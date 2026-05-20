@@ -62,6 +62,13 @@ jobs:
             pytest -v tests/
           fi
 
+      - name: Build and check package
+        if: matrix.python-version == '3.11'
+        run: |
+          uv pip install --system --no-cache build twine
+          python -m build
+          twine check dist/*
+
       - name: Upload coverage to Codecov
         if: matrix.python-version == '3.11'
         uses: codecov/codecov-action@v5
