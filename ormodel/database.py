@@ -31,21 +31,25 @@ def _is_sqlite_file_database(url: URL) -> bool:
     return bool(database and database != ":memory:")
 
 
+def _set_sqlite_pragmas(dbapi_connection: Any, url: URL, busy_timeout_ms: int) -> None:
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
+        cursor.execute("PRAGMA foreign_keys = ON")
+
+        if _is_sqlite_file_database(url):
+            cursor.execute("PRAGMA journal_mode = WAL")
+            cursor.fetchone()
+            cursor.execute("PRAGMA synchronous = NORMAL")
+    finally:
+        cursor.close()
+
+
 def _configure_sqlite_engine(engine: AsyncEngine, url: URL, busy_timeout_ms: int) -> None:
     @event.listens_for(engine.sync_engine, "connect")
-    def _set_sqlite_pragmas(dbapi_connection: Any, connection_record: Any) -> None:
+    def _set_sqlite_pragmas_on_connect(dbapi_connection: Any, connection_record: Any) -> None:
         del connection_record
-        cursor = dbapi_connection.cursor()
-        try:
-            cursor.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
-            cursor.execute("PRAGMA foreign_keys = ON")
-
-            if _is_sqlite_file_database(url):
-                cursor.execute("PRAGMA journal_mode = WAL")
-                cursor.fetchone()
-                cursor.execute("PRAGMA synchronous = NORMAL")
-        finally:
-            cursor.close()
+        _set_sqlite_pragmas(dbapi_connection, url, busy_timeout_ms)
 
 
 def init_database(database_url: str, echo_sql: bool = False):

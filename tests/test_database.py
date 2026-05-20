@@ -3,6 +3,7 @@
 import os
 
 import pytest
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
 from sqlmodel.ext.asyncio.session import AsyncSession
 
@@ -13,6 +14,7 @@ from examples.models import Hero
 from ormodel import SessionContextError
 from ormodel.database import (
     DEFAULT_SQLITE_BUSY_TIMEOUT_MS,
+    _set_sqlite_pragmas,
     database_context,
     get_engine,
     get_session,
@@ -22,6 +24,31 @@ from ormodel.database import (
 )
 
 # Mark all tests in this module to use pytest-asyncio
+
+
+class FakeCursor:
+    def __init__(self) -> None:
+        self.statements: list[str] = []
+        self.fetchone_calls = 0
+        self.closed = False
+
+    def execute(self, statement: str) -> None:
+        self.statements.append(statement)
+
+    def fetchone(self) -> tuple[str]:
+        self.fetchone_calls += 1
+        return ("wal",)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class FakeConnection:
+    def __init__(self, cursor: FakeCursor) -> None:
+        self._cursor = cursor
+
+    def cursor(self) -> FakeCursor:
+        return self._cursor
 
 
 async def test_get_session_commits_on_success(test_engine: AsyncEngine):
@@ -128,6 +155,36 @@ async def test_database_context_initializes_and_shuts_down(tmp_path):
 
     # Restore the default test DB initialization for any in-test follow-up usage.
     init_database(default_database_url, echo_sql=False)
+
+
+def test_set_sqlite_pragmas_for_file_database():
+    """File-backed SQLite should get lock-friendly and WAL PRAGMAs."""
+    cursor = FakeCursor()
+
+    _set_sqlite_pragmas(FakeConnection(cursor), make_url("sqlite+aiosqlite:///example.db"), 1234)
+
+    assert cursor.statements == [
+        "PRAGMA busy_timeout = 1234",
+        "PRAGMA foreign_keys = ON",
+        "PRAGMA journal_mode = WAL",
+        "PRAGMA synchronous = NORMAL",
+    ]
+    assert cursor.fetchone_calls == 1
+    assert cursor.closed is True
+
+
+def test_set_sqlite_pragmas_for_memory_database_skips_wal():
+    """In-memory SQLite should not attempt file-backed WAL configuration."""
+    cursor = FakeCursor()
+
+    _set_sqlite_pragmas(FakeConnection(cursor), make_url("sqlite+aiosqlite:///:memory:"), 1234)
+
+    assert cursor.statements == [
+        "PRAGMA busy_timeout = 1234",
+        "PRAGMA foreign_keys = ON",
+    ]
+    assert cursor.fetchone_calls == 0
+    assert cursor.closed is True
 
 
 async def test_init_database_configures_sqlite_pragmas(tmp_path):
