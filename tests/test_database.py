@@ -3,7 +3,9 @@
 import os
 
 import pytest
+from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+from sqlalchemy.pool import NullPool, StaticPool
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 # Import a model to use for testing
@@ -12,6 +14,9 @@ from examples.models import Hero
 # Import the context manager we are testing
 from ormodel import SessionContextError
 from ormodel.database import (
+    DEFAULT_SQLITE_BUSY_TIMEOUT_MS,
+    _is_sqlite_file_database,
+    _set_sqlite_pragmas,
     database_context,
     get_engine,
     get_session,
@@ -21,6 +26,31 @@ from ormodel.database import (
 )
 
 # Mark all tests in this module to use pytest-asyncio
+
+
+class FakeCursor:
+    def __init__(self) -> None:
+        self.statements: list[str] = []
+        self.fetchone_calls = 0
+        self.closed = False
+
+    def execute(self, statement: str) -> None:
+        self.statements.append(statement)
+
+    def fetchone(self) -> tuple[str]:
+        self.fetchone_calls += 1
+        return ("wal",)
+
+    def close(self) -> None:
+        self.closed = True
+
+
+class FakeConnection:
+    def __init__(self, cursor: FakeCursor) -> None:
+        self._cursor = cursor
+
+    def cursor(self) -> FakeCursor:
+        return self._cursor
 
 
 async def test_get_session_commits_on_success(test_engine: AsyncEngine):
@@ -127,6 +157,124 @@ async def test_database_context_initializes_and_shuts_down(tmp_path):
 
     # Restore the default test DB initialization for any in-test follow-up usage.
     init_database(default_database_url, echo_sql=False)
+
+
+def test_set_sqlite_pragmas_for_file_database():
+    """File-backed SQLite should get lock-friendly and WAL PRAGMAs."""
+    cursor = FakeCursor()
+
+    _set_sqlite_pragmas(FakeConnection(cursor), make_url("sqlite+aiosqlite:///example.db"), 1234)
+
+    assert cursor.statements == [
+        "PRAGMA busy_timeout = 1234",
+        "PRAGMA foreign_keys = ON",
+        "PRAGMA journal_mode = WAL",
+        "PRAGMA synchronous = NORMAL",
+    ]
+    assert cursor.fetchone_calls == 1
+    assert cursor.closed is True
+
+
+def test_set_sqlite_pragmas_for_memory_database_skips_wal():
+    """In-memory SQLite should not attempt file-backed WAL configuration."""
+    cursor = FakeCursor()
+
+    _set_sqlite_pragmas(FakeConnection(cursor), make_url("sqlite+aiosqlite:///:memory:"), 1234)
+
+    assert cursor.statements == [
+        "PRAGMA busy_timeout = 1234",
+        "PRAGMA foreign_keys = ON",
+    ]
+    assert cursor.fetchone_calls == 0
+    assert cursor.closed is True
+
+
+@pytest.mark.parametrize(
+    ("database_url", "expected"),
+    [
+        ("sqlite+aiosqlite:///:memory:", False),
+        ("sqlite+aiosqlite:///file::memory:?cache=shared&uri=true", False),
+        ("sqlite+aiosqlite:///file:memdb1?mode=memory&cache=shared&uri=true", False),
+        ("sqlite+aiosqlite:///example.db", True),
+    ],
+)
+def test_is_sqlite_file_database_handles_memory_uri_forms(database_url: str, expected: bool):
+    assert _is_sqlite_file_database(make_url(database_url)) is expected
+
+
+async def test_init_database_configures_sqlite_pragmas(tmp_path):
+    """SQLite engines should enable lock-friendly defaults for concurrent access."""
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'sqlite_pragmas.db'}"
+    default_database_url = os.environ["DATABASE_URL"]
+
+    await shutdown_database()
+    init_database(database_url, echo_sql=False)
+
+    try:
+        engine = get_engine()
+        assert isinstance(engine.sync_engine.pool, NullPool)
+        assert engine.sync_engine.pool._pre_ping is False
+
+        async with engine.connect() as conn:
+            busy_timeout = await conn.exec_driver_sql("PRAGMA busy_timeout")
+            foreign_keys = await conn.exec_driver_sql("PRAGMA foreign_keys")
+            journal_mode = await conn.exec_driver_sql("PRAGMA journal_mode")
+            synchronous = await conn.exec_driver_sql("PRAGMA synchronous")
+
+            assert busy_timeout.scalar_one() == DEFAULT_SQLITE_BUSY_TIMEOUT_MS
+            assert foreign_keys.scalar_one() == 1
+            assert journal_mode.scalar_one().lower() == "wal"
+            assert synchronous.scalar_one() == 1
+    finally:
+        await shutdown_database()
+        init_database(default_database_url, echo_sql=False)
+
+
+async def test_init_database_keeps_plain_in_memory_sqlite_on_static_pool():
+    """Plain in-memory SQLite should keep SQLAlchemy's StaticPool default."""
+    default_database_url = os.environ["DATABASE_URL"]
+
+    await shutdown_database()
+    init_database("sqlite+aiosqlite:///:memory:", echo_sql=False)
+
+    try:
+        engine = get_engine()
+        assert isinstance(engine.sync_engine.pool, StaticPool)
+
+        async with engine.begin() as conn:
+            await conn.exec_driver_sql("CREATE TABLE example (id INTEGER PRIMARY KEY)")
+
+        async with engine.connect() as conn:
+            result = await conn.exec_driver_sql(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'example'"
+            )
+            assert result.scalar_one() == 1
+    finally:
+        await shutdown_database()
+        init_database(default_database_url, echo_sql=False)
+
+
+async def test_init_database_keeps_shared_memory_sqlite_across_simultaneous_connections():
+    """Shared-cache in-memory SQLite should remain visible across simultaneous connections."""
+    default_database_url = os.environ["DATABASE_URL"]
+
+    await shutdown_database()
+    init_database("sqlite+aiosqlite:///file::memory:?cache=shared&uri=true", echo_sql=False)
+
+    try:
+        engine = get_engine()
+        async with engine.connect() as writer:
+            async with engine.connect() as reader:
+                await writer.exec_driver_sql("CREATE TABLE example (id INTEGER PRIMARY KEY)")
+                await writer.commit()
+
+                result = await reader.exec_driver_sql(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'example'"
+                )
+            assert result.scalar_one() == 1
+    finally:
+        await shutdown_database()
+        init_database(default_database_url, echo_sql=False)
 
 
 async def test_init_database_skips_if_already_initialized():

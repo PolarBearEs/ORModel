@@ -3,13 +3,19 @@ import contextvars
 import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
+from typing import Any
 
+from sqlalchemy import event
+from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
+from sqlalchemy.pool import NullPool
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from .exceptions import SessionContextError
 
 logger = logging.getLogger(__name__)
+
+DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 30_000
 
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
@@ -20,6 +26,34 @@ db_session_context: contextvars.ContextVar[AsyncSession | None] = contextvars.Co
 )
 
 
+def _is_sqlite_file_database(url: URL) -> bool:
+    database = url.database
+    if not database or database == ":memory:" or database.startswith("file::memory:"):
+        return False
+    return str(url.query.get("mode", "")).lower() != "memory"
+
+
+def _set_sqlite_pragmas(dbapi_connection: Any, url: URL, busy_timeout_ms: int) -> None:
+    cursor = dbapi_connection.cursor()
+    try:
+        cursor.execute(f"PRAGMA busy_timeout = {busy_timeout_ms}")
+        cursor.execute("PRAGMA foreign_keys = ON")
+
+        if _is_sqlite_file_database(url):
+            cursor.execute("PRAGMA journal_mode = WAL")
+            cursor.fetchone()
+            cursor.execute("PRAGMA synchronous = NORMAL")
+    finally:
+        cursor.close()
+
+
+def _configure_sqlite_engine(engine: AsyncEngine, url: URL, busy_timeout_ms: int) -> None:
+    @event.listens_for(engine.sync_engine, "connect")
+    def _set_sqlite_pragmas_on_connect(dbapi_connection: Any, connection_record: Any) -> None:
+        del connection_record
+        _set_sqlite_pragmas(dbapi_connection, url, busy_timeout_ms)
+
+
 def init_database(database_url: str, echo_sql: bool = False):
     global _engine, _session_factory, _is_shutdown
     if _engine is not None:
@@ -27,7 +61,23 @@ def init_database(database_url: str, echo_sql: bool = False):
         return
     logger.debug("Initializing database with URL: %s", database_url)
     try:
-        _engine = create_async_engine(database_url, echo=echo_sql, future=True, pool_pre_ping=True)
+        url = make_url(database_url)
+        is_sqlite = url.get_backend_name() == "sqlite"
+        is_file_sqlite = is_sqlite and _is_sqlite_file_database(url)
+        engine_kwargs: dict[str, Any] = {
+            "echo": echo_sql,
+            "future": True,
+            "pool_pre_ping": not is_file_sqlite,
+        }
+
+        if is_file_sqlite:
+            engine_kwargs["poolclass"] = NullPool
+
+        _engine = create_async_engine(database_url, **engine_kwargs)
+
+        if is_sqlite:
+            _configure_sqlite_engine(_engine, url, DEFAULT_SQLITE_BUSY_TIMEOUT_MS)
+
         _session_factory = async_sessionmaker(bind=_engine, class_=AsyncSession, expire_on_commit=False)
         _is_shutdown = False
         logger.debug("Database initialized successfully (Engine ID: %s)", id(_engine))
