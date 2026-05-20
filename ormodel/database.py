@@ -28,7 +28,9 @@ db_session_context: contextvars.ContextVar[AsyncSession | None] = contextvars.Co
 
 def _is_sqlite_file_database(url: URL) -> bool:
     database = url.database
-    return bool(database and database != ":memory:")
+    if not database or database == ":memory:" or database.startswith("file::memory:"):
+        return False
+    return str(url.query.get("mode", "")).lower() != "memory"
 
 
 def _set_sqlite_pragmas(dbapi_connection: Any, url: URL, busy_timeout_ms: int) -> None:
@@ -61,16 +63,15 @@ def init_database(database_url: str, echo_sql: bool = False):
     try:
         url = make_url(database_url)
         is_sqlite = url.get_backend_name() == "sqlite"
+        is_file_sqlite = is_sqlite and _is_sqlite_file_database(url)
         engine_kwargs: dict[str, Any] = {
             "echo": echo_sql,
             "future": True,
-            "pool_pre_ping": True,
+            "pool_pre_ping": not is_file_sqlite,
         }
 
-        if is_sqlite:
-            engine_kwargs["connect_args"] = {"timeout": DEFAULT_SQLITE_BUSY_TIMEOUT_MS / 1000}
-            if _is_sqlite_file_database(url):
-                engine_kwargs["poolclass"] = NullPool
+        if is_file_sqlite:
+            engine_kwargs["poolclass"] = NullPool
 
         _engine = create_async_engine(database_url, **engine_kwargs)
 

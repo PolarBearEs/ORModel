@@ -5,6 +5,7 @@ import os
 import pytest
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker
+from sqlalchemy.pool import NullPool
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 # Import a model to use for testing
@@ -14,6 +15,7 @@ from examples.models import Hero
 from ormodel import SessionContextError
 from ormodel.database import (
     DEFAULT_SQLITE_BUSY_TIMEOUT_MS,
+    _is_sqlite_file_database,
     _set_sqlite_pragmas,
     database_context,
     get_engine,
@@ -187,6 +189,19 @@ def test_set_sqlite_pragmas_for_memory_database_skips_wal():
     assert cursor.closed is True
 
 
+@pytest.mark.parametrize(
+    ("database_url", "expected"),
+    [
+        ("sqlite+aiosqlite:///:memory:", False),
+        ("sqlite+aiosqlite:///file::memory:?cache=shared&uri=true", False),
+        ("sqlite+aiosqlite:///file:memdb1?mode=memory&cache=shared&uri=true", False),
+        ("sqlite+aiosqlite:///example.db", True),
+    ],
+)
+def test_is_sqlite_file_database_handles_memory_uri_forms(database_url: str, expected: bool):
+    assert _is_sqlite_file_database(make_url(database_url)) is expected
+
+
 async def test_init_database_configures_sqlite_pragmas(tmp_path):
     """SQLite engines should enable lock-friendly defaults for concurrent access."""
     database_url = f"sqlite+aiosqlite:///{tmp_path / 'sqlite_pragmas.db'}"
@@ -197,14 +212,19 @@ async def test_init_database_configures_sqlite_pragmas(tmp_path):
 
     try:
         engine = get_engine()
+        assert isinstance(engine.sync_engine.pool, NullPool)
+        assert engine.sync_engine.pool._pre_ping is False
+
         async with engine.connect() as conn:
             busy_timeout = await conn.exec_driver_sql("PRAGMA busy_timeout")
             foreign_keys = await conn.exec_driver_sql("PRAGMA foreign_keys")
             journal_mode = await conn.exec_driver_sql("PRAGMA journal_mode")
+            synchronous = await conn.exec_driver_sql("PRAGMA synchronous")
 
             assert busy_timeout.scalar_one() == DEFAULT_SQLITE_BUSY_TIMEOUT_MS
             assert foreign_keys.scalar_one() == 1
             assert journal_mode.scalar_one().lower() == "wal"
+            assert synchronous.scalar_one() == 1
     finally:
         await shutdown_database()
         init_database(default_database_url, echo_sql=False)
