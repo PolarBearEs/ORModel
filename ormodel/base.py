@@ -9,7 +9,7 @@ from .manager import Manager, with_auto_session
 ModelType = TypeVar("ModelType", bound="ORModel")  # <-- Update bound type
 
 # Keep track of defined models
-_defined_models = []
+_defined_models: list[type["ORModel"]] = []
 
 
 class ORModel(SQLModel):

@@ -5,6 +5,7 @@ import pytest
 import pytest_asyncio
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm.exc import DetachedInstanceError
+from sqlmodel import col
 
 from examples.models import Hero, Team
 from ormodel import DoesNotExist, MultipleObjectsReturned, get_session, get_session_from_context
@@ -471,7 +472,7 @@ async def test_join_with_relationship(session_mode: SessionMode):
     await Hero.objects.create(name="Hero C", secret_name="SC", age=25, team_id=team_alpha.id)
 
     # Join Hero with Team and filter by Team name
-    heroes_from_alpha_team = await Hero.objects.join(Team).filter(Team.name == "Team Alpha").all()
+    heroes_from_alpha_team = await Hero.objects.join(Team).filter(col(Team.name) == "Team Alpha").all()
 
     assert len(heroes_from_alpha_team) == 2
     names = sorted([h.name for h in heroes_from_alpha_team])
@@ -480,10 +481,14 @@ async def test_join_with_relationship(session_mode: SessionMode):
     if session_mode is SessionMode.AUTO_SESSION:
         with pytest.raises(DetachedInstanceError):
             for hero in heroes_from_alpha_team:
-                assert hero.team.name == "Team Alpha"
+                team = hero.team
+                assert team is not None
+                assert team.name == "Team Alpha"
     else:
         for hero in heroes_from_alpha_team:
-            assert hero.team.name == "Team Alpha"
+            team = hero.team
+            assert team is not None
+            assert team.name == "Team Alpha"
 
 
 @pytest.mark.parametrize("commit", [True, False])

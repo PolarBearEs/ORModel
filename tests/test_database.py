@@ -12,6 +12,7 @@ from examples.models import Hero
 # Import the context manager we are testing
 from ormodel import SessionContextError
 from ormodel.database import (
+    DEFAULT_SQLITE_BUSY_TIMEOUT_MS,
     database_context,
     get_engine,
     get_session,
@@ -127,6 +128,51 @@ async def test_database_context_initializes_and_shuts_down(tmp_path):
 
     # Restore the default test DB initialization for any in-test follow-up usage.
     init_database(default_database_url, echo_sql=False)
+
+
+async def test_init_database_configures_sqlite_pragmas(tmp_path):
+    """SQLite engines should enable lock-friendly defaults for concurrent access."""
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'sqlite_pragmas.db'}"
+    default_database_url = os.environ["DATABASE_URL"]
+
+    await shutdown_database()
+    init_database(database_url, echo_sql=False)
+
+    try:
+        engine = get_engine()
+        async with engine.connect() as conn:
+            busy_timeout = await conn.exec_driver_sql("PRAGMA busy_timeout")
+            foreign_keys = await conn.exec_driver_sql("PRAGMA foreign_keys")
+            journal_mode = await conn.exec_driver_sql("PRAGMA journal_mode")
+
+            assert busy_timeout.scalar_one() == DEFAULT_SQLITE_BUSY_TIMEOUT_MS
+            assert foreign_keys.scalar_one() == 1
+            assert journal_mode.scalar_one().lower() == "wal"
+    finally:
+        await shutdown_database()
+        init_database(default_database_url, echo_sql=False)
+
+
+async def test_init_database_keeps_in_memory_sqlite_across_connections():
+    """In-memory SQLite should reuse its database across checked-out connections."""
+    default_database_url = os.environ["DATABASE_URL"]
+
+    await shutdown_database()
+    init_database("sqlite+aiosqlite:///:memory:", echo_sql=False)
+
+    try:
+        engine = get_engine()
+        async with engine.begin() as conn:
+            await conn.exec_driver_sql("CREATE TABLE example (id INTEGER PRIMARY KEY)")
+
+        async with engine.connect() as conn:
+            result = await conn.exec_driver_sql(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'example'"
+            )
+            assert result.scalar_one() == 1
+    finally:
+        await shutdown_database()
+        init_database(default_database_url, echo_sql=False)
 
 
 async def test_init_database_skips_if_already_initialized():

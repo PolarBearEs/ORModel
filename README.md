@@ -60,6 +60,8 @@ asyncio.run(main())
   - rollback on exception
 - Manager/query methods can run without explicit `get_session()`; an automatic short-lived session is created when needed.
 - For web apps, use request-scoped `async with get_session()` middleware.
+- SQLite gets automatic lock-contention defaults: `busy_timeout=30000`, `foreign_keys=ON`, and file-based databases use `journal_mode=WAL` with `synchronous=NORMAL`.
+- SQLite still allows only one writer at a time. These defaults reduce `database is locked` failures by waiting longer and using WAL, but they do not make writes fully parallel.
 
 ### Session modes
 
