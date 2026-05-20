@@ -2,14 +2,17 @@ services:
   ormodel:
     build:
       context: .
-      dockerfile: Dockerfile
+      dockerfile: dockerfile
     ports:
       - "8000:8000"
     environment:
       DATABASE_URL: sqlite+aiosqlite:////app/data/ormodel.db
     volumes:
+      - .:/app
       - sqlite_data:/app/data
-    restart: unless-stopped
+    working_dir: /app
+    stdin_open: true
+    tty: true
 
 volumes:
   sqlite_data:
