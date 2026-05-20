@@ -230,22 +230,30 @@ async def test_init_database_configures_sqlite_pragmas(tmp_path):
         init_database(default_database_url, echo_sql=False)
 
 
-async def test_init_database_keeps_in_memory_sqlite_across_connections():
-    """In-memory SQLite should reuse its database across checked-out connections."""
+@pytest.mark.parametrize(
+    "database_url",
+    [
+        "sqlite+aiosqlite:///:memory:",
+        "sqlite+aiosqlite:///file::memory:?cache=shared&uri=true",
+    ],
+)
+async def test_init_database_keeps_in_memory_sqlite_across_simultaneous_connections(database_url: str):
+    """In-memory SQLite should remain visible across simultaneous checked-out connections."""
     default_database_url = os.environ["DATABASE_URL"]
 
     await shutdown_database()
-    init_database("sqlite+aiosqlite:///:memory:", echo_sql=False)
+    init_database(database_url, echo_sql=False)
 
     try:
         engine = get_engine()
-        async with engine.begin() as conn:
-            await conn.exec_driver_sql("CREATE TABLE example (id INTEGER PRIMARY KEY)")
+        async with engine.connect() as writer:
+            async with engine.connect() as reader:
+                await writer.exec_driver_sql("CREATE TABLE example (id INTEGER PRIMARY KEY)")
+                await writer.commit()
 
-        async with engine.connect() as conn:
-            result = await conn.exec_driver_sql(
-                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'example'"
-            )
+                result = await reader.exec_driver_sql(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'example'"
+                )
             assert result.scalar_one() == 1
     finally:
         await shutdown_database()
