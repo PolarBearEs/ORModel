@@ -26,7 +26,7 @@ jobs:
 
     - name: Install uv and build tools
       run: |
-        pip install uv
+        pip install uv==0.9.0
         uv pip install --system --no-cache build twine
 
     - name: Build wheel and sdist
@@ -38,4 +38,4 @@ jobs:
         twine check dist/*
 
     - name: Publish distribution to PyPI
-      uses: pypa/gh-action-pypi-publish@release/v1
+      uses: pypa/gh-action-pypi-publish@v1.13.0
