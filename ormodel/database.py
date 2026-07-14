@@ -20,6 +20,7 @@ DEFAULT_SQLITE_BUSY_TIMEOUT_MS = 30_000
 _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 _is_shutdown: bool = False
+_database_context_active: bool = False
 
 db_session_context: contextvars.ContextVar[AsyncSession | None] = contextvars.ContextVar(
     "db_session_context", default=None
@@ -107,13 +108,21 @@ async def shutdown_database():
 
 @asynccontextmanager
 async def database_context(database_url: str, echo_sql: bool = False) -> AsyncGenerator[None, None]:
+    global _database_context_active
+    if _database_context_active:
+        raise RuntimeError("Nested database_context usage is not supported.")
+
+    _database_context_active = True
     try:
         init_database(database_url, echo_sql)
         logger.debug("Entered database_context, DB initialized.")
         yield
     finally:
         logger.debug("Exiting database_context, ensuring database shutdown...")
-        await shutdown_database()
+        try:
+            await shutdown_database()
+        finally:
+            _database_context_active = False
         logger.debug("Database shutdown process complete.")
 
 
