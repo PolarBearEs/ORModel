@@ -1,5 +1,6 @@
 # tests/test_database.py
 
+import asyncio
 import os
 
 import pytest
@@ -176,6 +177,69 @@ async def test_database_context_rejects_nested_usage(tmp_path):
 
     with pytest.raises(RuntimeError, match="not initialized"):
         get_engine()
+
+    # Restore the default test DB initialization for any in-test follow-up usage.
+    init_database(default_database_url, echo_sql=False)
+
+
+async def test_database_context_reuses_existing_context_when_requested(tmp_path):
+    """An opted-in nested context should reuse the engine without owning its lifecycle."""
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'reused_database_context.db'}"
+    default_database_url = os.environ["DATABASE_URL"]
+
+    await shutdown_database()
+    async with database_context(database_url, echo_sql=False):
+        outer_engine = get_engine()
+
+        async with database_context(database_url, echo_sql=False, reuse_existing=True):
+            assert get_engine() is outer_engine
+
+        assert get_engine() is outer_engine
+
+    with pytest.raises(RuntimeError, match="not initialized"):
+        get_engine()
+
+    # Restore the default test DB initialization for any in-test follow-up usage.
+    init_database(default_database_url, echo_sql=False)
+
+
+async def test_database_context_rejects_reusing_different_database(tmp_path):
+    """An opted-in nested context should not silently ignore a different URL."""
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'outer_database_context.db'}"
+    other_database_url = f"sqlite+aiosqlite:///{tmp_path / 'other_database_context.db'}"
+    default_database_url = os.environ["DATABASE_URL"]
+
+    await shutdown_database()
+    async with database_context(database_url, echo_sql=False):
+        outer_engine = get_engine()
+
+        with pytest.raises(RuntimeError, match="different database URL"):
+            async with database_context(other_database_url, echo_sql=False, reuse_existing=True):
+                pass
+
+        assert get_engine() is outer_engine
+
+    # Restore the default test DB initialization for any in-test follow-up usage.
+    init_database(default_database_url, echo_sql=False)
+
+
+async def test_database_context_rejects_reuse_from_different_task(tmp_path):
+    """An unrelated task should not borrow an active context with an unsafe lifetime."""
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'task_database_context.db'}"
+    default_database_url = os.environ["DATABASE_URL"]
+
+    async def reuse_database_context() -> None:
+        async with database_context(database_url, echo_sql=False, reuse_existing=True):
+            pass
+
+    await shutdown_database()
+    async with database_context(database_url, echo_sql=False):
+        outer_engine = get_engine()
+
+        with pytest.raises(RuntimeError, match="different task"):
+            await asyncio.create_task(reuse_database_context())
+
+        assert get_engine() is outer_engine
 
     # Restore the default test DB initialization for any in-test follow-up usage.
     init_database(default_database_url, echo_sql=False)
