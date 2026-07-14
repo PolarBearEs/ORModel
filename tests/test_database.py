@@ -159,6 +159,28 @@ async def test_database_context_initializes_and_shuts_down(tmp_path):
     init_database(default_database_url, echo_sql=False)
 
 
+async def test_database_context_rejects_nested_usage(tmp_path):
+    """A nested database context should fail without shutting down the outer context."""
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'nested_database_context.db'}"
+    default_database_url = os.environ["DATABASE_URL"]
+
+    await shutdown_database()
+    async with database_context(database_url, echo_sql=False):
+        outer_engine = get_engine()
+
+        with pytest.raises(RuntimeError, match="Nested database_context usage is not supported"):
+            async with database_context(database_url, echo_sql=False):
+                pass
+
+        assert get_engine() is outer_engine
+
+    with pytest.raises(RuntimeError, match="not initialized"):
+        get_engine()
+
+    # Restore the default test DB initialization for any in-test follow-up usage.
+    init_database(default_database_url, echo_sql=False)
+
+
 def test_set_sqlite_pragmas_for_file_database():
     """File-backed SQLite should get lock-friendly and WAL PRAGMAs."""
     cursor = FakeCursor()
