@@ -55,6 +55,8 @@ asyncio.run(main())
 ## Session model
 
 - `init_database(...)` initializes the async engine/sessionmaker once per process.
+- `database_context(...)` rejects nested use by default. Pass `reuse_existing=True` from the same task to reuse an
+  outer context without taking ownership of its shutdown; the database URL and `echo_sql` setting must match.
 - `get_session()` is the async DB session context manager built on SQLModel/SQLAlchemy `AsyncSession`, and manages transaction scope:
   - commit on success
   - rollback on exception
@@ -139,7 +141,7 @@ exact_18 = await Hero.objects.filter(age=18).all()
 | --- | --- | --- |
 | `init_database(database_url, echo_sql=False)` | `None` | Initialize engine + sessionmaker. |
 | `shutdown_database()` | `None` | Dispose engine and clear factory. |
-| `database_context(database_url, echo_sql=False)` | async context manager | Convenience wrapper for init/shutdown in scripts. |
+| `database_context(database_url, echo_sql=False, *, reuse_existing=False)` | async context manager | Convenience wrapper for init/shutdown in scripts; explicit same-task reuse is supported. |
 | `get_session()` | async context manager | Transaction scope: commit on success, rollback on error. |
 | `get_engine()` | `AsyncEngine` | Access initialized engine. |
 | `get_session_from_context()` | `AsyncSession` | Get current context session; raises if absent. |

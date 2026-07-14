@@ -1,4 +1,5 @@
 # ormodel/database.py
+import asyncio
 import contextvars
 import logging
 from collections.abc import AsyncGenerator
@@ -21,6 +22,7 @@ _engine: AsyncEngine | None = None
 _session_factory: async_sessionmaker[AsyncSession] | None = None
 _is_shutdown: bool = False
 _database_context_active: bool = False
+_database_context_owner: asyncio.Task[Any] | None = None
 
 db_session_context: contextvars.ContextVar[AsyncSession | None] = contextvars.ContextVar(
     "db_session_context", default=None
@@ -107,12 +109,31 @@ async def shutdown_database():
 
 
 @asynccontextmanager
-async def database_context(database_url: str, echo_sql: bool = False) -> AsyncGenerator[None, None]:
-    global _database_context_active
+async def database_context(
+    database_url: str, echo_sql: bool = False, *, reuse_existing: bool = False
+) -> AsyncGenerator[None, None]:
+    """Initialize the database for this scope, optionally reusing an outer context."""
+    global _database_context_active, _database_context_owner
+    current_task = asyncio.current_task()
+
     if _database_context_active:
-        raise RuntimeError("Nested database_context usage is not supported.")
+        if not reuse_existing:
+            raise RuntimeError(
+                "Nested database_context usage is not supported. Pass reuse_existing=True to reuse the active context."
+            )
+        if _database_context_owner is not current_task:
+            raise RuntimeError("Cannot reuse an active database_context from a different task.")
+        if _engine is None or _engine.url != make_url(database_url):
+            raise RuntimeError("Cannot reuse an active database_context with a different database URL.")
+        if bool(_engine.echo) != echo_sql:
+            raise RuntimeError("Cannot reuse an active database_context with a different echo_sql setting.")
+
+        logger.debug("Reusing active database_context without taking ownership.")
+        yield
+        return
 
     _database_context_active = True
+    _database_context_owner = current_task
     try:
         init_database(database_url, echo_sql)
         logger.debug("Entered database_context, DB initialized.")
@@ -123,6 +144,7 @@ async def database_context(database_url: str, echo_sql: bool = False) -> AsyncGe
             await shutdown_database()
         finally:
             _database_context_active = False
+            _database_context_owner = None
         logger.debug("Database shutdown process complete.")
 
 
