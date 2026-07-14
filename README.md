@@ -56,7 +56,7 @@ asyncio.run(main())
 
 - `init_database(...)` initializes the async engine/sessionmaker once per process.
 - `database_context(...)` rejects nested use by default. Pass `reuse_existing=True` from the same task to reuse an
-  outer context without taking ownership of its shutdown; the database URL must match.
+  outer context without taking ownership of its shutdown; the database URL and `echo_sql` setting must match.
 - `get_session()` is the async DB session context manager built on SQLModel/SQLAlchemy `AsyncSession`, and manages transaction scope:
   - commit on success
   - rollback on exception

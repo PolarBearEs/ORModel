@@ -125,6 +125,8 @@ async def database_context(
             raise RuntimeError("Cannot reuse an active database_context from a different task.")
         if _engine is None or _engine.url != make_url(database_url):
             raise RuntimeError("Cannot reuse an active database_context with a different database URL.")
+        if bool(_engine.echo) != echo_sql:
+            raise RuntimeError("Cannot reuse an active database_context with a different echo_sql setting.")
 
         logger.debug("Reusing active database_context without taking ownership.")
         yield

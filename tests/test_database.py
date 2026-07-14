@@ -223,6 +223,25 @@ async def test_database_context_rejects_reusing_different_database(tmp_path):
     init_database(default_database_url, echo_sql=False)
 
 
+async def test_database_context_rejects_reusing_different_echo_setting(tmp_path):
+    """An opted-in nested context should not silently ignore a different echo setting."""
+    database_url = f"sqlite+aiosqlite:///{tmp_path / 'echo_database_context.db'}"
+    default_database_url = os.environ["DATABASE_URL"]
+
+    await shutdown_database()
+    async with database_context(database_url, echo_sql=False):
+        outer_engine = get_engine()
+
+        with pytest.raises(RuntimeError, match="different echo_sql setting"):
+            async with database_context(database_url, echo_sql=True, reuse_existing=True):
+                pass
+
+        assert get_engine() is outer_engine
+
+    # Restore the default test DB initialization for any in-test follow-up usage.
+    init_database(default_database_url, echo_sql=False)
+
+
 async def test_database_context_rejects_reuse_from_different_task(tmp_path):
     """An unrelated task should not borrow an active context with an unsafe lifetime."""
     database_url = f"sqlite+aiosqlite:///{tmp_path / 'task_database_context.db'}"
