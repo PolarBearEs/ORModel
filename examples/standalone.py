@@ -1,42 +1,10 @@
 # examples/standalone.py
 import asyncio
 
-# --- Import library components ---
-from ormodel import (
-    database_context,  # <-- Use the context manager for setup/teardown
-    get_engine,  # <-- Import helper to get the engine
-    get_session,  # <-- Use the session context manager
-    metadata,  # <-- Import the metadata containing table definitions
-)
+from ormodel import create_tables, database_context, get_session
 
-# ---------------------------------
 from .config import get_settings
 from .models import Hero, Team
-
-
-async def create_schema(drop_existing: bool = False):
-    """Helper function to create database tables."""
-    print("--- [Standalone] Attempting to create schema... ---")
-    engine = get_engine()  # Get the engine initialized by database_context
-    if engine is None:
-        print("--- [Standalone] ERROR: Engine not available for schema creation. ---")
-        return
-
-    try:
-        async with engine.begin() as conn:
-            if drop_existing:
-                print("--- [Standalone] Dropping existing tables (if any)... ---")
-                await conn.run_sync(metadata.drop_all)
-                print("--- [Standalone] Tables dropped. ---")
-
-            print(f"--- [Standalone] Creating tables defined in metadata: {list(metadata.tables.keys())} ---")
-            # create_all checks for table existence first by default (checkfirst=True)
-            await conn.run_sync(metadata.create_all)
-            print("--- [Standalone] Schema creation process finished. ---")
-    except Exception as e:
-        print(f"--- [Standalone] ERROR during schema creation: {type(e).__name__}: {e} ---")
-        # Optionally re-raise or handle more gracefully
-        raise
 
 
 async def standalone_example():
@@ -52,7 +20,7 @@ async def standalone_example():
 
             # --- Create Schema ---
             # Set drop_existing=True if you want a completely fresh DB each time
-            await create_schema(drop_existing=True)
+            await create_tables(drop_existing=True)
             # --------------------
 
             # --- Database tables should exist now, proceed with ORM operations ---

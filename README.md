@@ -40,10 +40,11 @@ class Hero(ORModel, table=True):
 
 ```python
 import asyncio
-from ormodel import database_context, get_session
+from ormodel import create_tables, database_context, get_session
 
 async def main() -> None:
     async with database_context("sqlite+aiosqlite:///./example.db"):
+        await create_tables()
         async with get_session():
             hero = await Hero.objects.create(name="Flash", secret_name="Barry")
             same = await Hero.objects.get(id=hero.id)
@@ -71,97 +72,94 @@ asyncio.run(main())
 
 ## API reference
 
-`Model.objects` is a `Manager`. Query-building methods return a `Query`, and execution methods are `async`.
+The API follows three rules:
 
-### Manager (`Model.objects`)
+- **Reads take filters**: SQL expressions (`Hero.age >= 18`) and/or exact-match keywords (`name="Flash"`).
+- **Writes take model instances**, so the values you persist are the Pydantic models you already have.
+- **Every single-row write has a bulk counterpart.**
 
-| Method | Returns | Notes |
-| --- | --- | --- |
-| `all()` | `Sequence[Model]` | Fetch all rows for model. |
-| `first()` | `Model \| None` | First row or `None`. |
-| `one()` | `Model` | Exactly one row; raises on 0 or >1. |
-| `one_or_none()` | `Model \| None` | `None` on 0 rows; raises on >1. |
-| `get(*expr, **filters)` | `Model` | Single row lookup; raises `DoesNotExist` / `MultipleObjectsReturned`. |
-| `filter(*expr, **filters)` | `Query[Model]` | Build filtered query. |
-| `order_by(*columns)` | `Query[Model]` | Build ordered query. |
-| `limit(n)` | `Query[Model]` | Build limited query. |
-| `offset(n)` | `Query[Model]` | Build offset query. |
-| `join(target)` | `Query[Model]` | Build joined query. |
-| `count()` | `int` | Count rows (joins/limit/offset respected). |
-| `update(**values)` | `int` | Bulk update matching rows; returns affected row count. |
-| `create(**values)` | `Model` | Validate + insert + refresh one row. |
-| `get_or_create(obj, *, on=None)` | `tuple[Model, bool]` | `(obj, created)`; returns the row matching `obj` on `on` fields, else inserts `obj`. |
-| `upsert(obj, *, on=None, update_fields=None)` | `tuple[Model, bool]` | `(obj, created)`; copies `obj`'s set fields onto the matching row, else inserts `obj`. |
-| `delete()` | `int` | Bulk-delete all rows for this model. |
-| `bulk_create(Iterable[Model])` | `list[Model]` | Insert many instances with `session.add_all`. |
+`Model.objects` is a `Manager`, which is itself an unfiltered `Query`: everything you can call on
+`Hero.objects.filter(...)` you can call on `Hero.objects` directly. Builders return a new immutable `Query`;
+everything that touches the database is `async`.
 
-### Query (`Model.objects.filter(...)`)
+### Reading
 
 | Method | Returns | Notes |
 | --- | --- | --- |
-| `filter(*expr, **filters)` | `Query[Model]` | Add `WHERE` clauses (`*expr` for SQL expressions, `**filters` for exact field equality only). |
-| `order_by(*columns)` | `Query[Model]` | Add ordering. |
-| `limit(n)` | `Query[Model]` | Add SQL `LIMIT`. |
-| `offset(n)` | `Query[Model]` | Add SQL `OFFSET`. |
-| `join(target)` | `Query[Model]` | Add SQL `JOIN`. |
-| `all()` | `Sequence[Model]` | Execute and return all rows. |
-| `first()` | `Model \| None` | Execute and return first row. |
-| `one()` | `Model` | Execute expecting exactly one row. |
-| `one_or_none()` | `Model \| None` | Execute expecting <=1 row. |
-| `get(*expr, **filters)` | `Model` | Shortcut for `filter(...).one()`. |
-| `count()` | `int` | Count matching rows (joins/limit/offset respected). |
-| `update(**values)` | `int` | Bulk update matching rows; raises with `limit`/`offset`. |
-| `delete()` | `int` | Bulk delete matching rows; raises with `limit`/`offset`. |
+| `filter(*expr, **exact)` | `Query` | Add `WHERE` clauses. |
+| `order_by(*columns)` / `limit(n)` / `offset(n)` / `join(target, ...)` | `Query` | Shape the query. |
+| `all()` | `Sequence[Model]` | Every matching row. |
+| `first()` | `Model \| None` | First matching row, or `None`. |
+| `one()` / `one_or_none()` | `Model` / `Model \| None` | Exactly one row; raises `MultipleObjectsReturned` on >1 (`one()` raises `DoesNotExist` on 0). |
+| `get(*expr, **exact)` / `get_or_none(*expr, **exact)` | `Model` / `Model \| None` | Shortcuts for `filter(...).one()` / `filter(...).one_or_none()`. |
+| `exists()` | `bool` | Whether anything matches. |
+| `count()` | `int` | Number of rows the query returns (joins/limit/offset respected). |
 
-### get_or_create / upsert
+```python
+adults = await Hero.objects.filter(Hero.age >= 18).order_by(Hero.name).all()
+flash = await Hero.objects.get_or_none(name="Flash")
+```
 
-Both take a model instance (the values) and `on`, the fields used to find an existing row. `on` accepts a
-field name, a column attribute (`Hero.name`) or a list of them, and defaults to the primary key.
+### Writing
+
+| Single row | Bulk | Notes |
+| --- | --- | --- |
+| `Model.objects.create(**values)` | `Model.objects.bulk_create(objs)` | `create` validates `values` into a model first. |
+| `instance.save()` | | Insert or update this instance, then refresh it. |
+| `Model.objects.get_or_create(obj, *, on=None)` | | Return the row matching `obj`, or insert `obj`. |
+| `Model.objects.upsert(obj, *, on=None, update_fields=None)` | `Model.objects.bulk_upsert(objs, *, on=None, update_fields=None)` | Update the row matching `obj`, or insert `obj`. |
+| `instance.delete()` | `query.delete(*, each=False)` | |
+| | `query.update(*, each=False, **values)` | Set `values` on every matching row. |
+
+`get_or_create`, `upsert` and `bulk_upsert` share the same arguments:
+
+- `on`: the fields that identify an existing row. A field name, a column (`Hero.name`) or a list of them;
+  defaults to the primary key.
+- `update_fields`: the fields copied onto an existing row. Defaults to the fields **explicitly set** on the
+  instance, so values you didn't pass never overwrite stored data.
+
+All three return what was stored: `get_or_create` and `upsert` return `(instance, created)`, `bulk_upsert` returns
+the number of rows written.
 
 ```python
 team, created = await Team.objects.get_or_create(Team(name="Avengers", headquarters="NY"), on=Team.name)
 
-# Updates only the fields explicitly set on the instance (here: secret_name, age)
+# Only secret_name and age are copied onto an existing "Flash"; nothing else is touched.
 hero, created = await Hero.objects.upsert(Hero(name="Flash", secret_name="Barry", age=28), on="name")
 
-# Or choose the fields to copy onto the existing row
-hero, created = await Hero.objects.upsert(Hero(name="Flash", secret_name="Wally"), on="name", update_fields=["age"])
+# One INSERT ... ON CONFLICT per 500 rows instead of a SELECT + INSERT per row.
+await Team.objects.bulk_upsert(teams_from_api, on=Team.name)
+
+# Bulk writes on a filtered query
+await Hero.objects.filter(Hero.age < 18).update(team_id=None)
+await Hero.objects.filter(name="Flash").delete()
 ```
 
-When nothing matches, the instance itself is inserted (inside a SAVEPOINT). If a concurrent insert wins the race
-and the insert fails with an `IntegrityError`, the existing row is fetched and returned instead, and the surrounding
-transaction stays usable.
+Differences worth knowing:
 
-Comparison filters use SQL expressions:
+- `get_or_create`/`upsert` look the row up first, so `on` can be any fields. When nothing matches they insert
+  inside a SAVEPOINT: if a concurrent insert wins the race, the existing row is used and your transaction stays
+  usable.
+- `bulk_upsert` uses the database's native `INSERT ... ON CONFLICT` (SQLite and PostgreSQL). `on` must be covered
+  by a unique constraint or index, and instances repeating the same `on` values collapse to the last one.
+- `query.update()`/`query.delete()` refuse to run on an unfiltered query unless you pass `each=True`, so
+  `await Hero.objects.delete()` can't wipe a table when you meant `await hero.delete()`. They also refuse
+  `limit()`/`offset()` rather than silently touching every matching row.
 
-```python
-adults = await Hero.objects.filter(Hero.age > 18).all()
-teens = await Hero.objects.filter(Hero.age >= 13, Hero.age < 20).all()
-```
-
-Keyword filters remain exact-match only:
-
-```python
-exact_18 = await Hero.objects.filter(age=18).all()
-```
-
-### Model instance methods (`ORModel`)
-
-| Method | Returns | Notes |
-| --- | --- | --- |
-| `save()` | `Self` | Insert/update current instance and refresh it. |
-| `delete()` | `None` | Delete current instance. |
-
-### Database/session helpers
+### Database and sessions
 
 | Function | Returns | Notes |
 | --- | --- | --- |
-| `init_database(database_url, echo_sql=False)` | `None` | Initialize engine + sessionmaker. |
-| `shutdown_database()` | `None` | Dispose engine and clear factory. |
-| `database_context(database_url, echo_sql=False)` | async context manager | Convenience wrapper for init/shutdown in scripts. |
+| `init_database(database_url, echo_sql=False)` | `None` | Create the engine. Repeating the same URL is a no-op; a different URL raises. |
+| `shutdown_database()` | `None` | Dispose the engine. |
+| `database_context(database_url, echo_sql=False)` | async context manager | `init_database` + `shutdown_database` for scripts. Cannot be nested. |
+| `create_tables(drop_existing=False)` | `None` | Create every table defined by your models. |
 | `get_session()` | async context manager | Transaction scope: commit on success, rollback on error. |
-| `get_engine()` | `AsyncEngine` | Access initialized engine. |
-| `get_session_from_context()` | `AsyncSession` | Get current context session; raises if absent. |
+| `get_session_from_context()` | `AsyncSession` | The current session; raises `SessionContextError` if none. |
+| `get_engine()` | `AsyncEngine` | The initialized engine. |
+
+Only an entry point (a script's `main`, an app's lifespan) should open `database_context` or call
+`init_database`. Code running underneath uses `get_session()`.
 
 ### Exceptions
 

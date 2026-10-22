@@ -9,7 +9,7 @@ from sqlalchemy.pool import NullPool, StaticPool
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 # Import a model to use for testing
-from examples.models import Hero
+from examples.models import Hero, Team
 
 # Import the context manager we are testing
 from ormodel import SessionContextError
@@ -17,6 +17,7 @@ from ormodel.database import (
     DEFAULT_SQLITE_BUSY_TIMEOUT_MS,
     _is_sqlite_file_database,
     _set_sqlite_pragmas,
+    create_tables,
     database_context,
     get_engine,
     get_session,
@@ -300,11 +301,34 @@ async def test_init_database_keeps_shared_memory_sqlite_across_simultaneous_conn
 
 
 async def test_init_database_skips_if_already_initialized():
-    """init_database() should skip initialization if an engine already exists."""
+    """init_database() with the same URL is a no-op once an engine exists."""
     engine_before = get_engine()
-    init_database("sqlite+aiosqlite:///./some_other.db")
-    engine_after = get_engine()
-    assert engine_before is engine_after
+    init_database(str(engine_before.url))
+    assert get_engine() is engine_before
+
+
+async def test_init_database_rejects_a_different_url():
+    """init_database() must not silently keep using another database."""
+    engine_before = get_engine()
+    with pytest.raises(RuntimeError, match="different URL"):
+        init_database("sqlite+aiosqlite:///./some_other.db")
+    assert get_engine() is engine_before
+
+
+async def test_create_tables(tmp_path):
+    """create_tables() creates (and optionally recreates) every registered table."""
+    default_database_url = os.environ["DATABASE_URL"]
+    await shutdown_database()
+    try:
+        async with database_context(f"sqlite+aiosqlite:///{tmp_path / 'tables.db'}"):
+            await create_tables()
+            await Team.objects.create(name="Kept", headquarters="HQ")
+            await create_tables()
+            assert await Team.objects.count() == 1
+            await create_tables(drop_existing=True)
+            assert await Team.objects.count() == 0
+    finally:
+        init_database(default_database_url, echo_sql=False)
 
 
 async def test_init_database_raises_on_invalid_url():

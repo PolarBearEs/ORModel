@@ -2,18 +2,16 @@ import asyncio
 
 from sqlmodel import col
 
-from ormodel import database_context, get_engine, get_session, metadata
+from ormodel import create_tables, database_context, get_session
 
 from .config import get_settings
 from .models import Hero, Team
 
 
 class TeamRepository:
-    async def get_by_name(self, name: str) -> Team | None:
-        return await Team.objects.filter(name=name).one_or_none()
-
-    async def create(self, name: str, headquarters: str) -> Team:
-        return await Team.objects.create(name=name, headquarters=headquarters)
+    async def get_or_create(self, name: str, headquarters: str) -> Team:
+        team, _ = await Team.objects.get_or_create(Team(name=name, headquarters=headquarters), on=Team.name)
+        return team
 
 
 class HeroRepository:
@@ -41,25 +39,15 @@ class HeroService:
     ) -> Hero:
         team_id: int | None = None
         if team_name:
-            team = await self.teams.get_by_name(team_name)
-            if team is None:
-                team = await self.teams.create(name=team_name, headquarters=team_headquarters)
+            team = await self.teams.get_or_create(name=team_name, headquarters=team_headquarters)
             team_id = team.id
         return await self.heroes.create(name=name, secret_name=secret_name, age=age, team_id=team_id)
-
-
-async def create_schema(drop_existing: bool = False) -> None:
-    engine = get_engine()
-    async with engine.begin() as conn:
-        if drop_existing:
-            await conn.run_sync(metadata.drop_all)
-        await conn.run_sync(metadata.create_all)
 
 
 async def main() -> None:
     settings = get_settings()
     async with database_context(settings.DATABASE_URL, echo_sql=False):
-        await create_schema(drop_existing=True)
+        await create_tables(drop_existing=True)
 
         # Write operations in one transaction.
         async with get_session():

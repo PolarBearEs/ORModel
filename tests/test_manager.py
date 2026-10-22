@@ -437,7 +437,7 @@ async def test_update_with_no_matches():
 
 
 async def test_update_all_records():
-    """Test updating all records by using an empty filter."""
+    """Updating every row requires each=True."""
     await Hero.objects.create(name="Hero 1", secret_name="A", age=10)
     await Hero.objects.create(name="Hero 2", secret_name="B", age=20)
     await Hero.objects.create(name="Hero 3", secret_name="C", age=30)
@@ -445,7 +445,7 @@ async def test_update_all_records():
     total_heroes = await Hero.objects.count()
     assert total_heroes == 3
 
-    updated_count = await Hero.objects.filter().update(age=100)
+    updated_count = await Hero.objects.update(age=100, each=True)
 
     assert updated_count == total_heroes
     final_count = await Hero.objects.filter(age=100).count()
@@ -471,7 +471,7 @@ async def test_delete_all_records_via_manager():
     await Hero.objects.create(name="Delete All 1", secret_name="D1", age=10)
     await Hero.objects.create(name="Delete All 2", secret_name="D2", age=20)
 
-    deleted_count = await Hero.objects.delete()
+    deleted_count = await Hero.objects.delete(each=True)
 
     assert deleted_count == 2
     assert await Hero.objects.count() == 0
@@ -632,3 +632,85 @@ async def test_bulk_operations_reject_limit_and_offset(operation: str):
     with pytest.raises(ValueError, match="does not support limit"):
         await getattr(query, operation)(**kwargs)
     assert (await Hero.objects.get(name="Safe")).age == 1
+
+
+async def test_get_or_none_and_exists():
+    """get_or_none() mirrors get() without raising; exists() checks for any match."""
+    hero = await Hero.objects.create(name="Lookup", secret_name="L", age=40)
+
+    assert (await Hero.objects.get_or_none(name="Lookup")).id == hero.id
+    assert await Hero.objects.get_or_none(Hero.age > 100) is None
+    assert await Hero.objects.filter(name="Lookup").exists() is True
+    assert await Hero.objects.filter(name="Missing").exists() is False
+
+    await Hero.objects.create(name="Lookup", secret_name="L2")
+    with pytest.raises(MultipleObjectsReturned):
+        await Hero.objects.get_or_none(name="Lookup")
+
+
+async def test_bulk_upsert_inserts_and_updates(session_mode: SessionMode):
+    """bulk_upsert() inserts new rows and updates conflicting ones in place."""
+    existing = await Team.objects.create(name="Alpha", headquarters="Old")
+
+    written = await Team.objects.bulk_upsert(
+        [Team(name="Alpha", headquarters="New"), Team(name="Beta", headquarters="B")], on=Team.name
+    )
+
+    assert written == 2
+    teams = {team.name: team for team in await Team.objects.all()}
+    assert (teams["Alpha"].id, teams["Alpha"].headquarters) == (existing.id, "New")
+    assert teams["Beta"].headquarters == "B"
+    if session_mode is SessionMode.WITH_SESSION:
+        # Instances already loaded in the session are refreshed, not left stale.
+        assert existing.headquarters == "New"
+
+
+async def test_bulk_upsert_only_updates_set_fields_and_dedupes():
+    """Unset fields keep their stored value; repeated keys collapse to the last instance."""
+    await Hero.objects.create(name="Keep", secret_name="S", age=30)
+    # Hero.name is not unique, so match on the primary key instead.
+    hero_id = (await Hero.objects.get(name="Keep")).id
+
+    written = await Hero.objects.bulk_upsert(
+        [Hero(id=hero_id, name="Keep", secret_name="First"), Hero(id=hero_id, name="Keep", secret_name="Last")]
+    )
+
+    assert written == 1
+    hero = await Hero.objects.get(id=hero_id)
+    assert (hero.secret_name, hero.age) == ("Last", 30)
+
+
+async def test_bulk_upsert_empty_and_insert_only():
+    """No instances writes nothing; nothing to update means conflicting rows are left alone."""
+    assert await Team.objects.bulk_upsert([], on="name") == 0
+    await Team.objects.create(name="Fixed", headquarters="HQ")
+
+    await Team.objects.bulk_upsert([Team(name="Fixed", headquarters="Other")], on="name", update_fields=[])
+
+    assert (await Team.objects.get(name="Fixed")).headquarters == "HQ"
+
+
+@pytest.mark.parametrize("operation", ["update", "delete"])
+async def test_bulk_operations_require_each_when_unfiltered(operation: str):
+    """Unfiltered bulk update/delete raise unless each=True; filtered ones do not need it."""
+    await Hero.objects.create(name="Spared", secret_name="S", age=1)
+    kwargs = {"age": 2} if operation == "update" else {}
+
+    for query in (Hero.objects, Hero.objects.filter(), Hero.objects.order_by(Hero.id)):
+        with pytest.raises(ValueError, match="pass each=True"):
+            await getattr(query, operation)(**kwargs)
+    assert (await Hero.objects.get(name="Spared")).age == 1
+
+    assert await getattr(Hero.objects.filter(age=1), operation)(**kwargs) == 1
+
+
+@pytest.mark.parametrize("method", ["upsert", "bulk_upsert"])
+async def test_update_fields_rejects_primary_key(method: str):
+    """Listing the primary key in update_fields is refused before anything is written."""
+    with pytest.raises(ValueError, match="cannot include the primary key"):
+        await getattr(Team.objects, method)(
+            [Team(name="X", headquarters="Y")] if method == "bulk_upsert" else Team(name="X", headquarters="Y"),
+            on="name",
+            update_fields=["id"],
+        )
+    assert await Team.objects.count() == 0

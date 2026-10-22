@@ -4,6 +4,8 @@ from typing import TYPE_CHECKING, Any, Concatenate, Generic, ParamSpec, TypeVar,
 
 from sqlalchemy import func
 from sqlalchemy import update as sa_update
+from sqlalchemy.dialects.postgresql import insert as postgresql_insert
+from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import delete as sqlmodel_delete
@@ -22,6 +24,8 @@ ModelType = TypeVar("ModelType", bound="ORModel")
 S = TypeVar("S")
 P = ParamSpec("P")
 R = TypeVar("R")
+
+_DIALECT_INSERTS: dict[str, Callable[[Any], Any]] = {"sqlite": sqlite_insert, "postgresql": postgresql_insert}
 
 # A field reference: either its name or the class attribute (e.g. "name" or Hero.name)
 FieldRef = Any
@@ -65,11 +69,14 @@ class Query(Generic[ModelType]):
         """Resolve current request/task session from context."""
         return get_session_from_context()
 
-    def _where_only(self, operation: str) -> ColumnElement[bool] | None:
-        """Return the WHERE clause for bulk operations, refusing clauses they would silently drop."""
+    def _bulk_where(self, operation: str, each: bool) -> ColumnElement[bool] | None:
+        """Return the WHERE clause for bulk operations, refusing ones that would touch rows by accident."""
         if self._statement._limit_clause is not None or self._statement._offset_clause is not None:
             raise ValueError(f"{operation}() does not support limit()/offset(); filter the rows instead.")
-        return self._statement.whereclause
+        where_clause = self._statement.whereclause
+        if where_clause is None and not each:
+            raise ValueError(f"{operation}() on an unfiltered query affects every row; pass each=True to confirm.")
+        return where_clause
 
     # --- Builders ---
 
@@ -138,6 +145,16 @@ class Query(Generic[ModelType]):
         """Retrieves a single object matching the criteria (applied via filter)."""
         return await self.filter(*args, **kwargs).one()
 
+    async def get_or_none(self, *args: ColumnElement[bool], **kwargs: Any) -> ModelType | None:
+        """Like get(), but returns None instead of raising DoesNotExist."""
+        return await self.filter(*args, **kwargs).one_or_none()
+
+    @with_auto_session
+    async def exists(self) -> bool:
+        """Returns whether the query matches at least one row."""
+        result = await self._get_session().exec(select(self._statement.exists()))
+        return bool(result.one())
+
     @with_auto_session
     async def count(self) -> int:
         """Returns the count of objects matching the query (joins, limit and offset included)."""
@@ -146,22 +163,22 @@ class Query(Generic[ModelType]):
         return cast(int, result.one())
 
     @with_auto_session
-    async def update(self, **values: Any) -> int:
-        """Performs a bulk update on all rows matching the current query filter."""
+    async def update(self, *, each: bool = False, **values: Any) -> int:
+        """Sets `values` on every row matching the query. An unfiltered query requires each=True."""
+        where_clause = self._bulk_where("update", each)
         if not values:
             return 0
         stmt = sa_update(self._model_cls).values(**values)
-        where_clause = self._where_only("update")
         if where_clause is not None:
             stmt = stmt.where(where_clause)
         result = await self._get_session().exec(stmt)
         return result.rowcount
 
     @with_auto_session
-    async def delete(self) -> int:
-        """Performs a bulk delete on all rows matching the current query filter."""
+    async def delete(self, *, each: bool = False) -> int:
+        """Deletes every row matching the query. An unfiltered query requires each=True."""
+        where_clause = self._bulk_where("delete", each)
         stmt = sqlmodel_delete(self._model_cls)
-        where_clause = self._where_only("delete")
         if where_clause is not None:
             stmt = stmt.where(where_clause)
         result = await self._get_session().exec(stmt)
@@ -224,16 +241,12 @@ class Manager(Query[ModelType]):
         are copied, unless `update_fields` names them. The returned flag is True when `obj` was inserted.
         """
         lookup = self._lookup(obj, on)
+        fields = self._update_fields([obj], self._on_fields(on), update_fields)
         existing = await self.filter(**lookup).one_or_none() if lookup else None
         if existing is None:
             existing, created = await self._insert_or_fetch(obj, lookup)
             if created:
                 return existing, True
-
-        if update_fields is not None:
-            fields = {self._field_name(f) for f in update_fields}
-        else:
-            fields = set(obj.model_fields_set) - lookup.keys() - set(self._primary_key())
 
         changed = False
         for name in fields:
@@ -248,6 +261,58 @@ class Manager(Query[ModelType]):
             await session.refresh(existing)
         return existing, False
 
+    @with_auto_session
+    async def bulk_upsert(
+        self,
+        objs: Iterable[ModelType],
+        *,
+        on: FieldRef | Sequence[FieldRef] | None = None,
+        update_fields: Sequence[FieldRef] | None = None,
+        chunk_size: int = 500,
+    ) -> int:
+        """
+        Inserts many instances with native `INSERT ... ON CONFLICT DO UPDATE` (SQLite and PostgreSQL).
+
+        Same rules as upsert(), except that `on` must be covered by a unique constraint or index, conflicting
+        rows get the union of the fields set on the instances, and instances repeating the same `on` values
+        collapse to the last one. Returns the number of rows written; the instances are not refreshed.
+        """
+        objs = list(objs)
+        keys = self._on_fields(on)
+        table = self._model_cls.__table__  # type: ignore[attr-defined]
+        rows: dict[tuple[Any, ...], dict[str, Any]] = {}
+        for obj in objs:
+            row = {column.key: getattr(obj, column.key) for column in table.columns}
+            rows[tuple(row[key] for key in keys)] = row
+        if not rows:
+            return 0
+        values = list(rows.values())
+        # Leave unset primary keys to the database (autoincrement), as a regular insert would.
+        for key in self._primary_key():
+            if key not in keys and all(row[key] is None for row in values):
+                for row in values:
+                    del row[key]
+        updates = self._update_fields(objs, keys, update_fields)
+
+        session = self._get_session()
+        dialect = session.bind.dialect.name if session.bind is not None else None
+        if dialect not in _DIALECT_INSERTS:
+            raise NotImplementedError(f"bulk_upsert() is not supported for the {dialect!r} dialect.")
+        for start in range(0, len(values), chunk_size):
+            stmt = _DIALECT_INSERTS[dialect](table).values(values[start : start + chunk_size])
+            if updates:
+                stmt = stmt.on_conflict_do_update(
+                    index_elements=keys, set_={name: stmt.excluded[name] for name in updates}
+                )
+            else:
+                stmt = stmt.on_conflict_do_nothing(index_elements=keys)
+            await session.exec(stmt)
+        # The statement bypasses the identity map: refresh instances this session already holds.
+        for held in list(session.identity_map.values()):
+            if isinstance(held, self._model_cls) and tuple(getattr(held, key) for key in keys) in rows:
+                await session.refresh(held)
+        return len(values)
+
     # --- Helpers ---
 
     def _primary_key(self) -> list[str]:
@@ -259,15 +324,33 @@ class Manager(Query[ModelType]):
             raise AttributeError(f"'{self._model_cls.__name__}' has no field {field!r}")
         return name
 
-    def _lookup(self, obj: ModelType, on: FieldRef | Sequence[FieldRef] | None) -> dict[str, Any]:
-        """Build the `{field: value}` lookup taken from `obj`; empty when matching on an unset primary key."""
+    def _on_fields(self, on: FieldRef | Sequence[FieldRef] | None) -> list[str]:
+        """Resolve `on` to field names, defaulting to the primary key."""
         if on is None:
-            lookup = {name: getattr(obj, name) for name in self._primary_key()}
-            return lookup if any(value is not None for value in lookup.values()) else {}
+            return self._primary_key()
         fields = [on] if isinstance(on, str) or not isinstance(on, Sequence) else on
         if not fields:
             raise ValueError("`on` must name at least one field.")
-        return {name: getattr(obj, name) for name in map(self._field_name, fields)}
+        return [self._field_name(field) for field in fields]
+
+    def _lookup(self, obj: ModelType, on: FieldRef | Sequence[FieldRef] | None) -> dict[str, Any]:
+        """Build the `{field: value}` lookup taken from `obj`; empty when matching on an unset primary key."""
+        lookup = {name: getattr(obj, name) for name in self._on_fields(on)}
+        if on is None and all(value is None for value in lookup.values()):
+            return {}
+        return lookup
+
+    def _update_fields(
+        self, objs: Iterable[ModelType], keys: Iterable[str], update_fields: Sequence[FieldRef] | None
+    ) -> list[str]:
+        """Fields copied onto an existing row: `update_fields`, or every field explicitly set on `objs`."""
+        if update_fields is not None:
+            fields = [self._field_name(field) for field in update_fields]
+            if primary_key := set(fields) & set(self._primary_key()):
+                raise ValueError(f"update_fields cannot include the primary key: {sorted(primary_key)}")
+            return fields
+        fields_set: set[str] = set().union(*(obj.model_fields_set for obj in objs))
+        return sorted(fields_set - set(keys) - set(self._primary_key()))
 
     async def _insert_or_fetch(self, obj: ModelType, lookup: dict[str, Any]) -> tuple[ModelType, bool]:
         """Insert `obj` in a savepoint; if a concurrent insert wins the race, return that row instead."""
