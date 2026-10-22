@@ -3,6 +3,7 @@ from typing import TYPE_CHECKING, ClassVar, Self, TypeVar
 
 from sqlmodel import SQLModel
 
+from .database import get_session_from_context
 from .manager import Manager, with_auto_session
 
 # Type variable still refers conceptually to the model type
@@ -45,7 +46,7 @@ class ORModel(SQLModel):
         Saves the current model instance to the database.
         If the instance has a primary key, it will be updated; otherwise, it will be created.
         """
-        session = self.objects._get_session()
+        session = get_session_from_context()
         session.add(self)
         await session.flush()
         await session.refresh(self)
@@ -56,7 +57,7 @@ class ORModel(SQLModel):
         """
         Deletes the current model instance from the database.
         """
-        session = self.objects._get_session()
+        session = get_session_from_context()
         await session.delete(self)
         await session.flush()
 

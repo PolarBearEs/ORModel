@@ -59,28 +59,24 @@ async def standalone_example():
             async with get_session() as session:
                 print(f"--- [Standalone] Session {id(session)} acquired. ---")
                 # Create Teams
-                team_preventers, _ = await Team.objects.update_or_create(
-                    name="Preventers", defaults={"headquarters": "Sharp Tower"}
+                team_preventers, _ = await Team.objects.upsert(
+                    Team(name="Preventers", headquarters="Sharp Tower"), on=Team.name
                 )
-                team_zforce, _ = await Team.objects.update_or_create(
-                    name="Z-Force", defaults={"headquarters": "Sister Margaret’s Bar"}
+                team_zforce, _ = await Team.objects.upsert(
+                    Team(name="Z-Force", headquarters="Sister Margaret’s Bar"), on=Team.name
                 )
                 print(f"--- [Standalone] Teams created/found: {team_preventers.name}, {team_zforce.name}")
                 # Create Heroes
-                hero_1, c1 = await Hero.objects.update_or_create(
-                    name="Deadpond",
-                    secret_name="Dive Wilson",
-                    defaults={"age": 28, "team_id": team_zforce.id},
+                lookup = [Hero.name, Hero.secret_name]
+                hero_1, c1 = await Hero.objects.upsert(
+                    Hero(name="Deadpond", secret_name="Dive Wilson", age=28, team_id=team_zforce.id), on=lookup
                 )
-                hero_2, c2 = await Hero.objects.update_or_create(
-                    name="Spider-Boy",
-                    secret_name="Pedro Parqueador",
-                    defaults={"age": 16, "team_id": team_preventers.id},
+                hero_2, c2 = await Hero.objects.upsert(
+                    Hero(name="Spider-Boy", secret_name="Pedro Parqueador", age=16, team_id=team_preventers.id),
+                    on=lookup,
                 )
-                hero_3, c3 = await Hero.objects.update_or_create(
-                    name="Rusty-Man",
-                    secret_name="Tommy Sharp",
-                    defaults={"age": 48, "team_id": team_preventers.id},
+                hero_3, c3 = await Hero.objects.upsert(
+                    Hero(name="Rusty-Man", secret_name="Tommy Sharp", age=48, team_id=team_preventers.id), on=lookup
                 )
                 print(f"--- [Standalone] Hero created/found: {hero_1.name}, {hero_2.name}, {hero_3.name}")
 

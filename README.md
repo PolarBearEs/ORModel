@@ -87,13 +87,13 @@ asyncio.run(main())
 | `limit(n)` | `Query[Model]` | Build limited query. |
 | `offset(n)` | `Query[Model]` | Build offset query. |
 | `join(target)` | `Query[Model]` | Build joined query. |
-| `count()` | `int` | Count rows. |
+| `count()` | `int` | Count rows (joins/limit/offset respected). |
 | `update(**values)` | `int` | Bulk update matching rows; returns affected row count. |
 | `create(**values)` | `Model` | Validate + insert + refresh one row. |
-| `get_or_create(defaults=None, **filters)` | `tuple[Model, bool]` | `(obj, created)`; creates if not found. |
-| `update_or_create(defaults=None, **filters)` | `tuple[Model, bool]` | `(obj, created)`; updates found row or creates new row. |
+| `get_or_create(obj, *, on=None)` | `tuple[Model, bool]` | `(obj, created)`; returns the row matching `obj` on `on` fields, else inserts `obj`. |
+| `upsert(obj, *, on=None, update_fields=None)` | `tuple[Model, bool]` | `(obj, created)`; copies `obj`'s set fields onto the matching row, else inserts `obj`. |
 | `delete()` | `int` | Bulk-delete all rows for this model. |
-| `bulk_create(list[Model])` | `list[Model]` | Insert many instances with `session.add_all`. |
+| `bulk_create(Iterable[Model])` | `list[Model]` | Insert many instances with `session.add_all`. |
 
 ### Query (`Model.objects.filter(...)`)
 
@@ -109,9 +109,28 @@ asyncio.run(main())
 | `one()` | `Model` | Execute expecting exactly one row. |
 | `one_or_none()` | `Model \| None` | Execute expecting <=1 row. |
 | `get(*expr, **filters)` | `Model` | Shortcut for `filter(...).one()`. |
-| `count()` | `int` | Count matching rows. |
-| `update(**values)` | `int` | Bulk update matching rows. |
-| `delete()` | `int` | Bulk delete matching rows. |
+| `count()` | `int` | Count matching rows (joins/limit/offset respected). |
+| `update(**values)` | `int` | Bulk update matching rows; raises with `limit`/`offset`. |
+| `delete()` | `int` | Bulk delete matching rows; raises with `limit`/`offset`. |
+
+### get_or_create / upsert
+
+Both take a model instance (the values) and `on`, the fields used to find an existing row. `on` accepts a
+field name, a column attribute (`Hero.name`) or a list of them, and defaults to the primary key.
+
+```python
+team, created = await Team.objects.get_or_create(Team(name="Avengers", headquarters="NY"), on=Team.name)
+
+# Updates only the fields explicitly set on the instance (here: secret_name, age)
+hero, created = await Hero.objects.upsert(Hero(name="Flash", secret_name="Barry", age=28), on="name")
+
+# Or choose the fields to copy onto the existing row
+hero, created = await Hero.objects.upsert(Hero(name="Flash", secret_name="Wally"), on="name", update_fields=["age"])
+```
+
+When nothing matches, the instance itself is inserted (inside a SAVEPOINT). If a concurrent insert wins the race
+and the insert fails with an `IntegrityError`, the existing row is fetched and returned instead, and the surrounding
+transaction stays usable.
 
 Comparison filters use SQL expressions:
 

@@ -3,12 +3,12 @@ from enum import StrEnum
 
 import pytest
 import pytest_asyncio
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, PendingRollbackError
 from sqlalchemy.orm.exc import DetachedInstanceError
 from sqlmodel import col
 
 from examples.models import Hero, Team
-from ormodel import DoesNotExist, MultipleObjectsReturned, get_session, get_session_from_context
+from ormodel import DoesNotExist, MultipleObjectsReturned, Query, get_session, get_session_from_context
 
 # Mark all tests in this module to use pytest-asyncio
 
@@ -231,72 +231,136 @@ async def test_count_heroes():
     assert await Hero.objects.filter(age=30).count() == 0
 
 
-async def test_get_or_create_does_not_exist():
-    """Test get_or_create when the object doesn't exist."""
-    hero, created = await Hero.objects.get_or_create(name="New Hero", defaults={"secret_name": "Secret", "age": 22})
+async def test_get_or_create_inserts_when_missing():
+    """get_or_create inserts the given instance when nothing matches the lookup fields."""
+    hero, created = await Hero.objects.get_or_create(Hero(name="New Hero", secret_name="Secret", age=22), on="name")
     assert created is True
     assert hero.id is not None
-    assert hero.name == "New Hero"
-    assert hero.secret_name == "Secret"
-    assert hero.age == 22
-    # Verify count
+    assert (hero.name, hero.secret_name, hero.age) == ("New Hero", "Secret", 22)
     assert await Hero.objects.count() == 1
 
 
-async def test_get_or_create_exists():
-    """Test get_or_create when the object already exists."""
-    # Create initial hero
-    initial_hero = await Hero.objects.create(name="Existing Hero", secret_name="Original", age=50)
-    initial_id = initial_hero.id
+async def test_get_or_create_returns_existing_untouched():
+    """get_or_create returns the stored row and ignores the other values of the instance."""
+    initial = await Hero.objects.create(name="Existing Hero", secret_name="Original", age=50)
 
-    # Attempt get_or_create with the same name
     hero, created = await Hero.objects.get_or_create(
-        name="Existing Hero",
-        defaults={"secret_name": "Should Not Be Used", "age": 55},  # Defaults ignored
+        Hero(name="Existing Hero", secret_name="Should Not Be Used", age=55), on=Hero.name
     )
     assert created is False
-    assert hero.id == initial_id
-    assert hero.name == "Existing Hero"
-    assert hero.secret_name == "Original"  # Check it wasn't updated
-    assert hero.age == 50
-    # Verify count hasn't increased
+    assert hero.id == initial.id
+    assert (hero.secret_name, hero.age) == ("Original", 50)
     assert await Hero.objects.count() == 1
 
 
-async def test_update_or_create_creates_new():
-    """Test update_or_create when the object doesn't exist."""
-    hero, created = await Hero.objects.update_or_create(
-        name="UpdateOrCreate New", defaults={"secret_name": "UOC Secret", "age": 44}
+async def test_get_or_create_matches_on_multiple_fields():
+    """`on` accepts several fields; all of them must match."""
+    await Hero.objects.create(name="Twin", secret_name="A", age=1)
+
+    _, created_same = await Hero.objects.get_or_create(Hero(name="Twin", secret_name="A"), on=["name", "secret_name"])
+    _, created_other = await Hero.objects.get_or_create(
+        Hero(name="Twin", secret_name="B"), on=[Hero.name, Hero.secret_name]
     )
+    assert created_same is False
+    assert created_other is True
+    assert await Hero.objects.count() == 2
+
+
+async def test_get_or_create_defaults_to_primary_key():
+    """Without `on`, the lookup uses the primary key; an unset primary key always inserts."""
+    stored = await Hero.objects.create(name="By PK", secret_name="Original")
+
+    hero, created = await Hero.objects.get_or_create(Hero(id=stored.id, name="Other", secret_name="Other"))
+    assert created is False
+    assert hero.name == "By PK"
+
+    _, created = await Hero.objects.get_or_create(Hero(name="By PK", secret_name="Original"))
+    assert created is True
+    assert await Hero.objects.count() == 2
+
+
+async def test_get_or_create_rejects_unknown_lookup_field():
+    with pytest.raises(AttributeError, match="has no field 'nope'"):
+        await Hero.objects.get_or_create(Hero(name="X", secret_name="Y"), on="nope")
+
+
+async def test_upsert_creates_new():
+    """upsert inserts the instance when nothing matches."""
+    hero, created = await Hero.objects.upsert(Hero(name="Upsert New", secret_name="UOC Secret", age=44), on="name")
     assert created is True
     assert hero.id is not None
-    assert hero.name == "UpdateOrCreate New"
-    assert hero.secret_name == "UOC Secret"
-    assert hero.age == 44
+    assert (hero.name, hero.secret_name, hero.age) == ("Upsert New", "UOC Secret", 44)
     assert await Hero.objects.count() == 1
 
 
-async def test_update_or_create_updates_existing():
-    """Test update_or_create when the object already exists."""
-    initial_hero = await Hero.objects.create(name="UpdateMe", secret_name="Before", age=60)
-    initial_id = initial_hero.id
+async def test_upsert_updates_existing():
+    """upsert copies the instance's values onto the matching row."""
+    initial = await Hero.objects.create(name="UpdateMe", secret_name="Before", age=60)
 
-    hero, created = await Hero.objects.update_or_create(
-        name="UpdateMe",  # Match criteria
-        defaults={"secret_name": "After", "age": 61},  # Values to update
-    )
+    hero, created = await Hero.objects.upsert(Hero(name="UpdateMe", secret_name="After", age=61), on=Hero.name)
 
     assert created is False
-    assert hero.id == initial_id
-    assert hero.name == "UpdateMe"
-    assert hero.secret_name == "After"  # Check secret_name was updated
-    assert hero.age == 61  # Check age was updated
+    assert hero.id == initial.id
+    assert (hero.secret_name, hero.age) == ("After", 61)
     assert await Hero.objects.count() == 1
 
-    # Verify directly from DB
-    refreshed_hero = await Hero.objects.get(id=initial_id)
-    assert refreshed_hero.secret_name == "After"
-    assert refreshed_hero.age == 61
+    refreshed = await Hero.objects.get(id=initial.id)
+    assert (refreshed.secret_name, refreshed.age) == ("After", 61)
+
+
+async def test_upsert_only_copies_explicitly_set_fields():
+    """Fields left at their defaults on the instance do not overwrite stored values."""
+    initial = await Hero.objects.create(name="Partial", secret_name="Before", age=60)
+
+    hero, _ = await Hero.objects.upsert(Hero(name="Partial", secret_name="After"), on="name")
+    assert (hero.secret_name, hero.age) == ("After", 60)
+
+    hero, _ = await Hero.objects.upsert(Hero(name="Partial", secret_name="Ignored"), on="name", update_fields=["age"])
+    assert (hero.id, hero.secret_name, hero.age) == (initial.id, "After", None)
+
+
+class _MissFirstLookup:
+    """Makes the first one_or_none() miss, as if a concurrent insert landed right after the lookup."""
+
+    def __init__(self, monkeypatch: pytest.MonkeyPatch):
+        self.calls = 0
+        original = Query.one_or_none
+
+        async def one_or_none(query):
+            self.calls += 1
+            if self.calls == 1:
+                return None
+            return await original(query)
+
+        monkeypatch.setattr(Query, "one_or_none", one_or_none)
+
+
+@pytest.mark.parametrize("method", ["get_or_create", "upsert"])
+async def test_lost_insert_race_returns_existing_and_keeps_transaction(
+    monkeypatch: pytest.MonkeyPatch, session_mode: SessionMode, method: str
+):
+    """A unique violation from a concurrent insert is recovered inside a savepoint."""
+    await Team.objects.create(name="Earlier Work", headquarters="Keep")
+    await Team.objects.create(name="Racers", headquarters="Theirs")
+    lookups = _MissFirstLookup(monkeypatch)
+
+    team, created = await getattr(Team.objects, method)(Team(name="Racers", headquarters="Ours"), on="name")
+
+    assert created is False
+    assert lookups.calls == 2
+    assert team.headquarters == ("Theirs" if method == "get_or_create" else "Ours")
+    # The surrounding transaction is still usable and kept the earlier write.
+    assert await Team.objects.count() == 2
+
+
+async def test_insert_integrity_error_without_match_is_raised(monkeypatch: pytest.MonkeyPatch):
+    """An IntegrityError that is not explained by a matching row is re-raised."""
+    await Team.objects.create(name="Taken", headquarters="HQ")
+    _MissFirstLookup(monkeypatch)
+
+    with pytest.raises(IntegrityError):
+        # Matching on headquarters never finds the row, but the unique name still collides.
+        await Team.objects.get_or_create(Team(name="Taken", headquarters="Elsewhere"), on="headquarters")
 
 
 async def test_delete_hero():
@@ -493,7 +557,7 @@ async def test_join_with_relationship(session_mode: SessionMode):
 
 @pytest.mark.parametrize("commit", [True, False])
 async def test_unique_constraint(session_mode: SessionMode, commit: bool):
-    """Test that unique constraints are enforced (e.g., Team name)."""
+    """A failed create() leaves the transaction to the caller instead of silently rolling it back."""
     await Team.objects.create(name="UniqueTeam", headquarters="HQ Unique")
     assert await Team.objects.count() == 1
     if commit and session_mode is SessionMode.WITH_SESSION:
@@ -501,6 +565,11 @@ async def test_unique_constraint(session_mode: SessionMode, commit: bool):
 
     with pytest.raises(IntegrityError):
         await Team.objects.create(name="UniqueTeam", headquarters="HQ Duplicate Attempt")
+
+    if session_mode is SessionMode.WITH_SESSION:
+        with pytest.raises(PendingRollbackError):
+            await Team.objects.count()
+        await get_session_from_context().rollback()
 
     expected_count = 1 if (session_mode is SessionMode.AUTO_SESSION or commit) else 0
     assert await Team.objects.count() == expected_count
@@ -542,131 +611,24 @@ async def test_one_raises_multiple_objects_returned_when_count_greater_than_one(
         await Hero.objects.filter(name="Duplicate").one()
 
 
-async def test_create_rolls_back_on_error(session_mode: SessionMode):
-    """Test that create() rolls back the session on error."""
-    # We can simulate an error by trying to create a duplicate if there's a unique constraint
-    # Team name is unique
-    await Team.objects.create(name="Unique Team", headquarters="HQ")
+async def test_count_respects_join_and_limit():
+    """count() counts the rows the query would return, joins and limit included."""
+    team = await Team.objects.create(name="Counted", headquarters="HQ")
+    await Team.objects.create(name="Other", headquarters="HQ")
+    for index in range(3):
+        await Hero.objects.create(name=f"H{index}", secret_name="S", team_id=team.id)
 
-    # In WITH_SESSION mode, the first create is part of the current transaction.
-    # The subsequent failing create will trigger a rollback on the session,
-    # which would rollback the first create too if we don't commit it now.
-    if session_mode == SessionMode.WITH_SESSION:
-        await get_session_from_context().commit()
-
-    with pytest.raises(IntegrityError):
-        await Team.objects.create(name="Unique Team", headquarters="Another HQ")
-
-    # Verify that the session is still usable or at least the DB is consistent
-    assert await Team.objects.count() == 1
+    assert await Hero.objects.join(Team).filter(Team.name == "Counted").count() == 3
+    assert await Hero.objects.limit(2).count() == 2
 
 
-async def test_get_or_create_race_condition(monkeypatch):
-    """
-    Test the race condition where an object is created between get() and create() in get_or_create().
-    """
-    # 1. First get() raises DoesNotExist
-    # 2. create() raises IntegrityError (simulating concurrent creation)
-    # 3. Second get() succeeds
+@pytest.mark.parametrize("operation", ["update", "delete"])
+async def test_bulk_operations_reject_limit_and_offset(operation: str):
+    """Bulk update/delete refuse limit/offset instead of silently touching every matching row."""
+    await Hero.objects.create(name="Safe", secret_name="S", age=1)
+    query = Hero.objects.order_by(Hero.id).limit(1)
+    kwargs = {"age": 2} if operation == "update" else {}
 
-    original_get = Hero.objects.get
-    original_create = Hero.objects.create
-
-    call_count_get = 0
-
-    async def mock_get(*args, **kwargs):
-        nonlocal call_count_get
-        call_count_get += 1
-        if call_count_get == 1:
-            raise DoesNotExist("Mock DoesNotExist")
-        return await original_get(*args, **kwargs)
-
-    async def mock_create(*args, **kwargs):
-        # Create the object properly so the next get succeeds
-        await original_create(*args, **kwargs)
-        # But raise IntegrityError to simulate it was created by "someone else"
-        raise IntegrityError("Mock IntegrityError", params={}, orig=Exception())
-
-    monkeypatch.setattr(Hero.objects, "get", mock_get)
-    monkeypatch.setattr(Hero.objects, "create", mock_create)
-
-    # Use a unique name to ensure clean state
-    hero, created = await Hero.objects.get_or_create(name="Race Hero", secret_name="Racer", age=25)
-
-    assert created is False
-    assert hero.name == "Race Hero"
-    assert call_count_get == 2
-
-
-async def test_update_or_create_race_condition(monkeypatch):
-    """
-    Test the race condition where an object is created between get() and create() in update_or_create().
-    """
-    # 1. First get() raises DoesNotExist
-    # 2. create() raises IntegrityError
-    # 3. Second get() succeeds
-
-    original_get = Hero.objects.get
-    original_create = Hero.objects.create
-
-    call_count_get = 0
-
-    async def mock_get(*args, **kwargs):
-        nonlocal call_count_get
-        call_count_get += 1
-        if call_count_get == 1:
-            raise DoesNotExist("Mock DoesNotExist")
-        return await original_get(*args, **kwargs)
-
-    async def mock_create(*args, **kwargs):
-        # Create it so the retry get finds it
-        await original_create(*args, **kwargs)
-        raise IntegrityError("Mock IntegrityError", params={}, orig=Exception())
-
-    monkeypatch.setattr(Hero.objects, "get", mock_get)
-    monkeypatch.setattr(Hero.objects, "create", mock_create)
-
-    hero, created = await Hero.objects.update_or_create(
-        name="Race Update", defaults={"secret_name": "Racer", "age": 30}
-    )
-
-    assert created is False
-    assert hero.name == "Race Update"
-    assert call_count_get == 2
-
-
-async def test_get_or_create_integrity_error_persistent(monkeypatch):
-    """
-    Test get_or_create where create raises IntegrityError but the object is still not found.
-    (e.g. constraint violation other than uniqueness, or instant deletion)
-    """
-
-    async def mock_get(*args, **kwargs):
-        raise DoesNotExist("Mock DoesNotExist")
-
-    async def mock_create(*args, **kwargs):
-        raise IntegrityError("Mock IntegrityError", params={}, orig=Exception())
-
-    monkeypatch.setattr(Hero.objects, "get", mock_get)
-    monkeypatch.setattr(Hero.objects, "create", mock_create)
-
-    with pytest.raises(IntegrityError, match="Mock IntegrityError"):
-        await Hero.objects.get_or_create(name="Fail Hero", defaults={"age": 20})
-
-
-async def test_update_or_create_integrity_error_persistent(monkeypatch):
-    """
-    Test update_or_create where create raises IntegrityError but the object is still not found.
-    """
-
-    async def mock_get(*args, **kwargs):
-        raise DoesNotExist("Mock DoesNotExist")
-
-    async def mock_create(*args, **kwargs):
-        raise IntegrityError("Mock IntegrityError", params={}, orig=Exception())
-
-    monkeypatch.setattr(Hero.objects, "get", mock_get)
-    monkeypatch.setattr(Hero.objects, "create", mock_create)
-
-    with pytest.raises(IntegrityError, match="Mock IntegrityError"):
-        await Hero.objects.update_or_create(name="Fail Update", defaults={"age": 20})
+    with pytest.raises(ValueError, match="does not support limit"):
+        await getattr(query, operation)(**kwargs)
+    assert (await Hero.objects.get(name="Safe")).age == 1
