@@ -118,6 +118,11 @@ async def database_context(database_url: str, echo_sql: bool = False) -> AsyncGe
     _database_context_active = True
     try:
         init_database(database_url, echo_sql)
+    except BaseException:
+        # Nothing was initialized here, so leave any existing engine alone.
+        _database_context_active = False
+        raise
+    try:
         logger.debug("Entered database_context, DB initialized.")
         yield
     finally:

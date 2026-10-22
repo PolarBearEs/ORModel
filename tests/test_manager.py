@@ -3,12 +3,22 @@ from enum import StrEnum
 
 import pytest
 import pytest_asyncio
+from sqlalchemy import Column, String, text
 from sqlalchemy.exc import IntegrityError, PendingRollbackError
 from sqlalchemy.orm.exc import DetachedInstanceError
-from sqlmodel import col
+from sqlmodel import Field, col
 
 from examples.models import Hero, Team
-from ormodel import DoesNotExist, MultipleObjectsReturned, Query, get_session, get_session_from_context
+from ormodel import DoesNotExist, MultipleObjectsReturned, ORModel, Query, get_session, get_session_from_context
+
+
+class Label(ORModel, table=True):
+    """A field whose column has another name, and a column filled in by the database."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    title: str = Field(sa_column=Column("label_title", String, unique=True, nullable=False))
+    color: str | None = Field(default=None, sa_column_kwargs={"server_default": text("'grey'")})
+
 
 # Mark all tests in this module to use pytest-asyncio
 
@@ -688,6 +698,58 @@ async def test_bulk_upsert_empty_and_insert_only():
     await Team.objects.bulk_upsert([Team(name="Fixed", headquarters="Other")], on="name", update_fields=[])
 
     assert (await Team.objects.get(name="Fixed")).headquarters == "HQ"
+
+
+async def test_bulk_upsert_inserts_every_instance_without_a_key():
+    """Instances with an unset `on` value never collide with each other: each one is inserted."""
+    written = await Team.objects.bulk_upsert(
+        [
+            Team(name="One", headquarters="A"),
+            Team(name="Two", headquarters="B"),
+            Team(id=50, name="Three", headquarters="C"),
+        ]
+    )
+
+    assert written == 3
+    assert sorted(team.name for team in await Team.objects.all()) == ["One", "Three", "Two"]
+    assert (await Team.objects.get(name="Three")).id == 50
+
+
+async def test_bulk_upsert_leaves_generated_values_to_the_database():
+    """Unset server defaults and keys are filled in by the database, as with a regular insert."""
+    await Label.objects.bulk_upsert([Label(title="new"), Label(title="red", color="red")])
+
+    labels = {label.title: label for label in await Label.objects.all()}
+    assert (labels["new"].color, labels["red"].color) == ("grey", "red")
+    assert labels["new"].id is not None
+
+
+async def test_bulk_upsert_maps_fields_to_renamed_columns():
+    """Fields stored under another column name are written and matched through that column."""
+    await Label.objects.bulk_upsert([Label(title="a", color="red")], on=Label.title)
+
+    written = await Label.objects.bulk_upsert([Label(title="a", color="blue")], on=Label.title)
+
+    assert written == 1
+    assert [(label.title, label.color) for label in await Label.objects.all()] == [("a", "blue")]
+
+
+async def test_bulk_upsert_counts_only_written_rows():
+    """Rows skipped by ON CONFLICT DO NOTHING are not counted."""
+    await Team.objects.create(name="Fixed", headquarters="HQ")
+
+    written = await Team.objects.bulk_upsert(
+        [Team(name="Fixed", headquarters="Other"), Team(name="New", headquarters="HQ")], on="name", update_fields=[]
+    )
+
+    assert written == 1
+
+
+async def test_bulk_upsert_rejects_non_positive_chunk_size():
+    """A chunk size that would skip every write is refused."""
+    with pytest.raises(ValueError, match="chunk_size"):
+        await Team.objects.bulk_upsert([Team(name="X", headquarters="Y")], chunk_size=0)
+    assert await Team.objects.count() == 0
 
 
 @pytest.mark.parametrize("operation", ["update", "delete"])

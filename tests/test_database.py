@@ -315,6 +315,15 @@ async def test_init_database_rejects_a_different_url():
     assert get_engine() is engine_before
 
 
+async def test_database_context_with_a_different_url_keeps_the_active_engine():
+    """A database_context rejected on entry must not shut down the database already in use."""
+    engine_before = get_engine()
+    with pytest.raises(RuntimeError, match="different URL"):
+        async with database_context("sqlite+aiosqlite:///./some_other.db"):
+            pass
+    assert get_engine() is engine_before
+
+
 async def test_create_tables(tmp_path):
     """create_tables() creates (and optionally recreates) every registered table."""
     default_database_url = os.environ["DATABASE_URL"]

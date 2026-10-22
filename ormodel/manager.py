@@ -7,6 +7,7 @@ from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
 from sqlalchemy.exc import IntegrityError
+from sqlalchemy.orm import class_mapper
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import delete as sqlmodel_delete
 from sqlmodel import select
@@ -275,48 +276,67 @@ class Manager(Query[ModelType]):
 
         Same rules as upsert(), except that `on` must be covered by a unique constraint or index, conflicting
         rows get the union of the fields set on the instances, and instances repeating the same `on` values
-        collapse to the last one. Returns the number of rows written; the instances are not refreshed.
+        collapse to the last one (instances with an unset `on` value are always inserted). Returns the number of
+        rows inserted or updated; the instances passed in are not refreshed.
         """
+        if chunk_size <= 0:
+            raise ValueError("chunk_size must be positive.")
         objs = list(objs)
         keys = self._on_fields(on)
-        table = self._model_cls.__table__  # type: ignore[attr-defined]
-        rows: dict[tuple[Any, ...], dict[str, Any]] = {}
-        for obj in objs:
-            row = {column.key: getattr(obj, column.key) for column in table.columns}
-            rows[tuple(row[key] for key in keys)] = row
-        if not rows:
-            return 0
-        values = list(rows.values())
-        # Leave unset primary keys to the database (autoincrement), as a regular insert would.
-        for key in self._primary_key():
-            if key not in keys and all(row[key] is None for row in values):
-                for row in values:
-                    del row[key]
         updates = self._update_fields(objs, keys, update_fields)
+        columns = self._columns()
+        keyed: dict[tuple[Any, ...], dict[str, Any]] = {}
+        unkeyed: list[dict[str, Any]] = []
+        for obj in objs:
+            # Like a regular insert, leave unset generated values (autoincrement, server defaults) to the database.
+            row = {
+                column.key: value
+                for name, column in columns.items()
+                if (value := getattr(obj, name)) is not None
+                or not (column.primary_key or column.default is not None or column.server_default is not None)
+            }
+            key = tuple(getattr(obj, name) for name in keys)
+            if any(value is None for value in key):
+                unkeyed.append(row)  # NULL never conflicts: always a new row.
+            else:
+                keyed[key] = row
+        # A multi-row VALUES needs the same columns in every row.
+        batches: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+        for row in [*keyed.values(), *unkeyed]:
+            batches.setdefault(tuple(row), []).append(row)
 
         session = self._get_session()
         dialect = session.bind.dialect.name if session.bind is not None else None
         if dialect not in _DIALECT_INSERTS:
             raise NotImplementedError(f"bulk_upsert() is not supported for the {dialect!r} dialect.")
-        for start in range(0, len(values), chunk_size):
-            stmt = _DIALECT_INSERTS[dialect](table).values(values[start : start + chunk_size])
-            if updates:
-                stmt = stmt.on_conflict_do_update(
-                    index_elements=keys, set_={name: stmt.excluded[name] for name in updates}
-                )
-            else:
-                stmt = stmt.on_conflict_do_nothing(index_elements=keys)
-            await session.exec(stmt)
+        table = self._model_cls.__table__  # type: ignore[attr-defined]
+        index_elements = [columns[name] for name in keys]
+        written = 0
+        for batch in batches.values():
+            for start in range(0, len(batch), chunk_size):
+                stmt = _DIALECT_INSERTS[dialect](table).values(batch[start : start + chunk_size])
+                if updates:
+                    set_ = {columns[name].key: stmt.excluded[columns[name].key] for name in updates}
+                    stmt = stmt.on_conflict_do_update(index_elements=index_elements, set_=set_)
+                else:
+                    stmt = stmt.on_conflict_do_nothing(index_elements=index_elements)
+                result = await session.exec(stmt)
+                written += result.rowcount
         # The statement bypasses the identity map: refresh instances this session already holds.
         for held in list(session.identity_map.values()):
-            if isinstance(held, self._model_cls) and tuple(getattr(held, key) for key in keys) in rows:
+            if isinstance(held, self._model_cls) and tuple(getattr(held, key) for key in keys) in keyed:
                 await session.refresh(held)
-        return len(values)
+        return written
 
     # --- Helpers ---
 
+    def _columns(self) -> dict[str, Any]:
+        """Map each field name to its column (the column name may differ, e.g. with sa_column)."""
+        return {prop.key: prop.columns[0] for prop in class_mapper(self._model_cls).column_attrs}
+
     def _primary_key(self) -> list[str]:
-        return [column.key for column in self._model_cls.__table__.primary_key]  # type: ignore[attr-defined]
+        mapper = class_mapper(self._model_cls)
+        return [mapper.get_property_by_column(column).key for column in mapper.primary_key]
 
     def _field_name(self, field: FieldRef) -> str:
         name = field if isinstance(field, str) else getattr(field, "key", None)
