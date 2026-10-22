@@ -1,4 +1,4 @@
-from collections.abc import AsyncGenerator, Sequence
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
 # --- FastAPI Imports ---
@@ -98,8 +98,8 @@ async def create_new_team(team_data: TeamCreate):
 @app.get("/teams/", response_model=list[TeamRead], dependencies=DB_ROUTE_DEPENDENCIES)
 async def read_all_teams(skip: int = 0, limit: int = 100):
     """Reads all teams with pagination."""
-    teams_seq = await Team.objects.all()
-    return list(teams_seq)[skip : skip + limit]
+    teams = await Team.objects.order_by(Team.id).offset(skip).limit(limit).all()
+    return list(teams)
 
 
 @app.post("/heroes/", response_model=HeroRead, status_code=201, dependencies=DB_ROUTE_DEPENDENCIES)
@@ -130,11 +130,8 @@ async def read_all_heroes(
         # Use join based on relationship definition
         query = query.join(Hero.team).filter(col(Team.name) == team_name)
 
-    # Fetch all filtered then slice (less efficient for large offsets)
-    # For production, implement .offset().limit() in the Query class
-    all_filtered_heroes: Sequence[Hero] = await query.order_by(Hero.id).all()
-    heroes = list(all_filtered_heroes)[skip : skip + limit]
-    return heroes
+    heroes = await query.order_by(Hero.id).offset(skip).limit(limit).all()
+    return list(heroes)
 
 
 @app.get("/heroes/{hero_id}", response_model=HeroRead, dependencies=DB_ROUTE_DEPENDENCIES)
