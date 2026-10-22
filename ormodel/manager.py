@@ -275,9 +275,10 @@ class Manager(Query[ModelType]):
         Inserts many instances with native `INSERT ... ON CONFLICT DO UPDATE` (SQLite and PostgreSQL).
 
         Same rules as upsert(), except that `on` must be covered by a unique constraint or index, conflicting
-        rows get the union of the fields set on the instances (except values left for the database to generate), and instances repeating the same `on` values
-        collapse to the last one (instances with an unset `on` value are always inserted). Returns the number of
-        rows inserted or updated; the instances passed in are not refreshed.
+        rows get the union of the fields set on the instances (except values left for the database to generate),
+        and instances repeating the same `on` values collapse to the last one (instances with an unset `on` value
+        are always inserted). Returns the number of rows inserted or updated; the instances passed in are not
+        refreshed.
         """
         if chunk_size <= 0:
             raise ValueError("chunk_size must be positive.")
