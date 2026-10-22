@@ -329,6 +329,21 @@ async def test_upsert_only_copies_explicitly_set_fields():
     assert (hero.id, hero.secret_name, hero.age) == (initial.id, "After", None)
 
 
+async def test_upsert_without_changes_writes_nothing():
+    """Upserting the stored values back leaves the row untouched."""
+    team = await Team.objects.create(name="Same", headquarters="HQ")
+
+    again, created = await Team.objects.upsert(Team(name="Same", headquarters="HQ"), on="name")
+
+    assert (again.id, again.headquarters, created) == (team.id, "HQ", False)
+
+
+async def test_on_must_name_a_field():
+    """An empty `on` would match every row, so it is refused."""
+    with pytest.raises(ValueError, match="at least one field"):
+        await Team.objects.get_or_create(Team(name="X", headquarters="Y"), on=[])
+
+
 class _MissFirstLookup:
     """Makes the first one_or_none() miss, as if a concurrent insert landed right after the lookup."""
 
@@ -661,6 +676,7 @@ async def test_get_or_none_and_exists():
 async def test_bulk_upsert_inserts_and_updates(session_mode: SessionMode):
     """bulk_upsert() inserts new rows and updates conflicting ones in place."""
     existing = await Team.objects.create(name="Alpha", headquarters="Old")
+    untouched = await Team.objects.create(name="Gamma", headquarters="G")
 
     written = await Team.objects.bulk_upsert(
         [Team(name="Alpha", headquarters="New"), Team(name="Beta", headquarters="B")], on=Team.name
@@ -673,6 +689,7 @@ async def test_bulk_upsert_inserts_and_updates(session_mode: SessionMode):
     if session_mode is SessionMode.WITH_SESSION:
         # Instances already loaded in the session are refreshed, not left stale.
         assert existing.headquarters == "New"
+        assert untouched.headquarters == "G"
 
 
 async def test_bulk_upsert_only_updates_set_fields_and_dedupes():
@@ -745,6 +762,14 @@ async def test_bulk_upsert_counts_only_written_rows():
     assert written == 1
 
 
+async def test_bulk_upsert_rejects_unsupported_dialects(monkeypatch: pytest.MonkeyPatch):
+    """Dialects without INSERT ... ON CONFLICT are refused instead of falling back silently."""
+    monkeypatch.setattr("ormodel.manager._DIALECT_INSERTS", {})
+
+    with pytest.raises(NotImplementedError, match="'sqlite' dialect"):
+        await Team.objects.bulk_upsert([Team(name="X", headquarters="Y")])
+
+
 async def test_bulk_upsert_rejects_non_positive_chunk_size():
     """A chunk size that would skip every write is refused."""
     with pytest.raises(ValueError, match="chunk_size"):
@@ -764,6 +789,13 @@ async def test_bulk_operations_require_each_when_unfiltered(operation: str):
     assert (await Hero.objects.get(name="Spared")).age == 1
 
     assert await getattr(Hero.objects.filter(age=1), operation)(**kwargs) == 1
+
+
+async def test_update_without_values_does_nothing():
+    """A filtered update() with no values touches no rows."""
+    await Hero.objects.create(name="Still", secret_name="S", age=1)
+
+    assert await Hero.objects.filter(age=1).update() == 0
 
 
 @pytest.mark.parametrize("method", ["upsert", "bulk_upsert"])
