@@ -741,6 +741,26 @@ async def test_bulk_upsert_leaves_generated_values_to_the_database():
     assert labels["new"].id is not None
 
 
+async def test_bulk_upsert_clears_values_explicitly_set_to_none():
+    """An explicit None is written, even on a column the database would otherwise fill in."""
+    await Label.objects.bulk_upsert([Label(title="a", color="red"), Label(title="b", color="red")], on=Label.title)
+
+    await Label.objects.bulk_upsert([Label(title="a", color=None), Label(title="c", color=None)], on=Label.title)
+
+    labels = {label.title: label.color for label in await Label.objects.all()}
+    assert labels == {"a": None, "b": "red", "c": None}
+
+
+async def test_bulk_upsert_keeps_stored_values_left_to_the_database():
+    """A column left unset on one instance is not overwritten with its default, even if others set it."""
+    await Label.objects.bulk_upsert([Label(title="a", color="red")], on=Label.title)
+
+    await Label.objects.bulk_upsert([Label(title="a"), Label(title="b", color="blue")], on=Label.title)
+
+    labels = {label.title: label.color for label in await Label.objects.all()}
+    assert labels == {"a": "red", "b": "blue"}
+
+
 async def test_bulk_upsert_maps_fields_to_renamed_columns():
     """Fields stored under another column name are written and matched through that column."""
     await Label.objects.bulk_upsert([Label(title="a", color="red")], on=Label.title)

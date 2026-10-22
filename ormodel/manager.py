@@ -275,7 +275,7 @@ class Manager(Query[ModelType]):
         Inserts many instances with native `INSERT ... ON CONFLICT DO UPDATE` (SQLite and PostgreSQL).
 
         Same rules as upsert(), except that `on` must be covered by a unique constraint or index, conflicting
-        rows get the union of the fields set on the instances, and instances repeating the same `on` values
+        rows get the union of the fields set on the instances (except values left for the database to generate), and instances repeating the same `on` values
         collapse to the last one (instances with an unset `on` value are always inserted). Returns the number of
         rows inserted or updated; the instances passed in are not refreshed.
         """
@@ -288,11 +288,13 @@ class Manager(Query[ModelType]):
         keyed: dict[tuple[Any, ...], dict[str, Any]] = {}
         unkeyed: list[dict[str, Any]] = []
         for obj in objs:
-            # Like a regular insert, leave unset generated values (autoincrement, server defaults) to the database.
+            # Like a regular insert, leave unset generated values (autoincrement, server defaults) to the database,
+            # but keep a None that was set explicitly so it clears the stored value.
             row = {
                 column.key: value
                 for name, column in columns.items()
                 if (value := getattr(obj, name)) is not None
+                or (name in obj.model_fields_set and not column.primary_key)
                 or not (column.primary_key or column.default is not None or column.server_default is not None)
             }
             key = tuple(getattr(obj, name) for name in keys)
@@ -312,11 +314,13 @@ class Manager(Query[ModelType]):
         table = self._model_cls.__table__  # type: ignore[attr-defined]
         index_elements = [columns[name] for name in keys]
         written = 0
-        for batch in batches.values():
+        for supplied, batch in batches.items():
+            # Columns left to the database are not copied over a stored value.
+            batch_updates = [columns[name].key for name in updates if columns[name].key in supplied]
             for start in range(0, len(batch), chunk_size):
                 stmt = _DIALECT_INSERTS[dialect](table).values(batch[start : start + chunk_size])
-                if updates:
-                    set_ = {columns[name].key: stmt.excluded[columns[name].key] for name in updates}
+                if batch_updates:
+                    set_ = {key: stmt.excluded[key] for key in batch_updates}
                     stmt = stmt.on_conflict_do_update(index_elements=index_elements, set_=set_)
                 else:
                     stmt = stmt.on_conflict_do_nothing(index_elements=index_elements)
