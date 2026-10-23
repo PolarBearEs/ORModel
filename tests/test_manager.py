@@ -294,6 +294,17 @@ async def test_get_or_create_rejects_unknown_lookup_field():
         await Hero.objects.get_or_create(Hero(name="X", secret_name="Y"), on="nope")
 
 
+@pytest.mark.parametrize("method", ["get_or_create", "upsert"])
+async def test_insert_as_first_write_rolls_back_with_the_session(method: str):
+    """The savepoint around the insert stays inside the session's transaction, even on SQLite."""
+    with pytest.raises(RuntimeError, match="abort"):
+        async with get_session():
+            await getattr(Team.objects, method)(Team(name="Ghost", headquarters="Nowhere"), on=Team.name)
+            raise RuntimeError("abort")
+
+    assert not await Team.objects.filter(name="Ghost").exists()
+
+
 async def test_upsert_creates_new():
     """upsert inserts the instance when nothing matches."""
     hero, created = await Hero.objects.upsert(Hero(name="Upsert New", secret_name="UOC Secret", age=44), on="name")
@@ -759,6 +770,21 @@ async def test_bulk_upsert_keeps_stored_values_left_to_the_database():
 
     labels = {label.title: label.color for label in await Label.objects.all()}
     assert labels == {"a": "red", "b": "blue"}
+
+
+async def test_bulk_upsert_keeps_pending_changes():
+    """Unflushed edits to held instances survive the refresh after the statement."""
+    async with get_session() as session:
+        held = await Hero.objects.create(name="Pending", secret_name="Old", age=20)
+        held.age = 21
+        session.add(held)
+        await Hero.objects.bulk_upsert(
+            [Hero(id=held.id, name="Pending", secret_name="New")], update_fields=[Hero.secret_name]
+        )
+        assert (held.age, held.secret_name) == (21, "New")
+
+    stored = await Hero.objects.get(name="Pending")
+    assert (stored.age, stored.secret_name) == (21, "New")
 
 
 async def test_bulk_upsert_maps_fields_to_renamed_columns():

@@ -49,6 +49,19 @@ def with_auto_session(
     return wrapper
 
 
+async def _begin_sqlite_transaction(session: AsyncSession) -> None:
+    """
+    Make sure SQLite is inside a transaction before a savepoint is opened.
+
+    The sqlite3 driver only begins a transaction before a write, so a SAVEPOINT opened first would start (and its
+    RELEASE commit) the transaction itself, outside the session's rollback.
+    """
+    connection = await session.connection()
+    raw = await connection.get_raw_connection()
+    if connection.dialect.name == "sqlite" and not getattr(raw.driver_connection, "in_transaction", True):
+        await connection.exec_driver_sql("BEGIN")
+
+
 class Query(Generic[ModelType]):
     """Immutable query: builder methods return a new Query, async methods execute it."""
 
@@ -314,6 +327,9 @@ class Manager(Query[ModelType]):
             raise NotImplementedError(f"bulk_upsert() is not supported for the {dialect!r} dialect.")
         table = self._model_cls.__table__  # type: ignore[attr-defined]
         index_elements = [columns[name] for name in keys]
+        # The statement does not autoflush: write pending changes first so they are ordered before it and the
+        # refresh below does not discard them.
+        await session.flush()
         written = 0
         for supplied, batch in batches.items():
             # Columns left to the database are not copied over a stored value.
@@ -380,6 +396,7 @@ class Manager(Query[ModelType]):
     async def _insert_or_fetch(self, obj: ModelType, lookup: dict[str, Any]) -> tuple[ModelType, bool]:
         """Insert `obj` in a savepoint; if a concurrent insert wins the race, return that row instead."""
         session = self._get_session()
+        await _begin_sqlite_transaction(session)
         try:
             async with session.begin_nested():
                 session.add(obj)
