@@ -3,6 +3,7 @@ from sqlmodel import *  # noqa: F403
 
 from .base import ORModel, get_defined_models
 from .database import (
+    create_tables,
     database_context,
     db_session_context,
     get_engine,
@@ -23,6 +24,7 @@ __all__ = [
     *_sqlmodel_reexports,
     "ORModel",
     "get_defined_models",
+    "create_tables",
     "database_context",
     "db_session_context",
     "get_engine",
