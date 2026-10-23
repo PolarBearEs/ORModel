@@ -20,6 +20,13 @@ class Label(ORModel, table=True):
     color: str | None = Field(default=None, sa_column_kwargs={"server_default": text("'grey'")})
 
 
+class Tick(ORModel, table=True):
+    """Every column is filled in by the database."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    source: str | None = Field(default=None, sa_column_kwargs={"server_default": text("'clock'")})
+
+
 # Mark all tests in this module to use pytest-asyncio
 
 
@@ -750,6 +757,14 @@ async def test_bulk_upsert_leaves_generated_values_to_the_database():
     labels = {label.title: label for label in await Label.objects.all()}
     assert (labels["new"].color, labels["red"].color) == ("grey", "red")
     assert labels["new"].id is not None
+
+
+async def test_bulk_upsert_inserts_rows_with_only_generated_values():
+    """Instances leaving every column to the database are each inserted."""
+    written = await Tick.objects.bulk_upsert([Tick(), Tick(), Tick(source="manual")])
+
+    assert written == 3
+    assert sorted(tick.source for tick in await Tick.objects.all()) == ["clock", "clock", "manual"]
 
 
 async def test_bulk_upsert_clears_values_explicitly_set_to_none():

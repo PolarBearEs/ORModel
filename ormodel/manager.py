@@ -332,6 +332,11 @@ class Manager(Query[ModelType]):
         await session.flush()
         written = 0
         for supplied, batch in batches.items():
+            if not supplied:
+                # Every column is left to the database: a DEFAULT VALUES insert takes no conflict clause or extra rows.
+                for _ in batch:
+                    written += (await session.exec(table.insert())).rowcount
+                continue
             # Columns left to the database are not copied over a stored value.
             batch_updates = [columns[name].key for name in updates if columns[name].key in supplied]
             for start in range(0, len(batch), chunk_size):
