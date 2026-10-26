@@ -351,13 +351,15 @@ class Manager(Query[ModelType]):
                 key = tuple(getattr(obj, name) for name in keys)
                 ordered.pop(key, None)
                 ordered[key] = row
-        rows = list(ordered.values())
         batches: list[tuple[tuple[str, ...], list[dict[str, Any]]]]
         if generated_key and unkeyed:
             # Unkeyed rows with a generated key may conflict with the same row, which PostgreSQL rejects within one
             # statement: write them one at a time, in order (the last one wins, as with keyed duplicates).
-            batches = [(tuple(row), [row]) for row in rows]
+            batches = [(tuple(row), [row]) for row in ordered.values()]
         else:
+            # Rows with explicit keys go first so keys assigned automatically (autoincrement) cannot take them.
+            rows = [row for key, row in ordered.items() if isinstance(key, tuple)]
+            rows += [row for key, row in ordered.items() if not isinstance(key, tuple)]
             # A multi-row VALUES needs the same columns in every row.
             grouped: dict[tuple[str, ...], list[dict[str, Any]]] = {}
             for row in rows:

@@ -918,6 +918,16 @@ async def test_bulk_upsert_writes_inputs_conflicting_on_a_computed_key_one_at_a_
     assert [box.side for box in await Box.objects.all()] == [2]
 
 
+async def test_bulk_upsert_reserves_explicit_primary_keys_before_autoincrement():
+    """An explicit primary key is written before rows whose key is assigned automatically, so neither is lost."""
+    written = await Team.objects.bulk_upsert(
+        [Team(name="Auto", headquarters="A"), Team(id=1, name="Set", headquarters="S")]
+    )
+
+    assert written == 2
+    assert sorted((team.id, team.name) for team in await Team.objects.all()) == [(1, "Set"), (2, "Auto")]
+
+
 async def test_bulk_upsert_applies_explicit_and_default_keys_in_input_order():
     """An explicit key matching an earlier input's server default is written after it, so the last input wins."""
     await Setting.objects.bulk_upsert([Setting(value="earlier"), Setting(scope="global", value="last")], on="scope")
