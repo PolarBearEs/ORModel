@@ -906,6 +906,9 @@ async def test_bulk_upsert_writes_inputs_conflicting_on_a_computed_key_one_at_a_
     assert written == 2
     assert [box.side for box in await Box.objects.all()] == [-2]
 
+    await Box.objects.bulk_upsert([Box(side=2), Box(side=-2, revision=7), Box(side=2)], on=Box.area)
+    assert [box.side for box in await Box.objects.all()] == [2]
+
 
 async def test_bulk_upsert_accepts_detached_inputs_with_expired_computed_values():
     """A detached input whose only expired value is computed is written without reloading it."""

@@ -347,18 +347,23 @@ class Manager(Query[ModelType]):
                 unkeyed.append(row)  # Inserted unless the database fills in a conflicting key.
             else:
                 keyed[tuple(getattr(obj, name) for name in keys)] = row
-        # A multi-row VALUES needs the same columns in every row.
-        batches: dict[tuple[str, ...], list[dict[str, Any]]] = {}
-        for row in [*keyed.values(), *unkeyed]:
-            batches.setdefault(tuple(row), []).append(row)
+        rows = [*keyed.values(), *unkeyed]
+        batches: list[tuple[tuple[str, ...], list[dict[str, Any]]]]
+        if generated_key and unkeyed:
+            # Unkeyed rows with a generated key may conflict with the same row, which PostgreSQL rejects within one
+            # statement: write them one at a time, in order (the last one wins, as with keyed duplicates).
+            batches = [(tuple(row), [row]) for row in rows]
+        else:
+            # A multi-row VALUES needs the same columns in every row.
+            grouped: dict[tuple[str, ...], list[dict[str, Any]]] = {}
+            for row in rows:
+                grouped.setdefault(tuple(row), []).append(row)
+            batches = list(grouped.items())
 
         table = self._model_cls.__table__  # type: ignore[attr-defined]
         index_elements = [columns[name] for name in keys]
-        # Unkeyed rows with a generated key may conflict with the same row, which PostgreSQL rejects within one
-        # statement: write them one at a time (the last one wins, as with keyed duplicates).
-        step = 1 if generated_key and unkeyed else chunk_size
         written = 0
-        for supplied, batch in batches.items():
+        for supplied, batch in batches:
             if not supplied:
                 # Every column is left to the database: a DEFAULT VALUES insert takes no conflict clause or extra rows.
                 for _ in batch:
@@ -366,8 +371,8 @@ class Manager(Query[ModelType]):
                 continue
             # Columns left to the database are not copied over a stored value.
             batch_updates = [columns[name].key for name in updates if columns[name].key in supplied]
-            for start in range(0, len(batch), step):
-                stmt = _DIALECT_INSERTS[dialect](table).values(batch[start : start + step])
+            for start in range(0, len(batch), chunk_size):
+                stmt = _DIALECT_INSERTS[dialect](table).values(batch[start : start + chunk_size])
                 if batch_updates:
                     set_ = {key: stmt.excluded[key] for key in batch_updates}
                     stmt = stmt.on_conflict_do_update(index_elements=index_elements, set_=set_)
