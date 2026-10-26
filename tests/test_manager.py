@@ -934,6 +934,12 @@ async def test_bulk_upsert_applies_explicit_and_default_keys_in_input_order():
 
     assert [(setting.scope, setting.value) for setting in await Setting.objects.all()] == [("global", "last")]
 
+    # Also when the last input names the stored row by primary key: input order is kept, not reordered by key.
+    await Setting.objects.bulk_upsert(
+        [Setting(value="again"), Setting(id=1, scope="global", value="final")], on="scope"
+    )
+    assert [(setting.scope, setting.value) for setting in await Setting.objects.all()] == [("global", "final")]
+
 
 async def test_bulk_upsert_accepts_detached_inputs_with_expired_computed_values():
     """A detached input whose only expired value is computed is written without reloading it."""
