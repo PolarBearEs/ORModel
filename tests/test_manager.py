@@ -32,7 +32,10 @@ class Box(ORModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     side: int
-    area: int | None = Field(default=None, sa_column=Column(Integer, Computed("side * side")))
+    area: int | None = Field(default=None, sa_column=Column(Integer, Computed("side * side"), unique=True))
+    revision: int | None = Field(
+        default=None, sa_column_kwargs={"server_default": text("0"), "onupdate": text("revision + 1")}
+    )
 
 
 # Mark all tests in this module to use pytest-asyncio
@@ -832,6 +835,18 @@ async def test_bulk_upsert_leaves_computed_columns_to_the_database():
 
     assert written == 2
     assert sorted((stored.side, stored.area) for stored in await Box.objects.all()) == [(3, 9), (5, 25)]
+
+
+async def test_bulk_upsert_loads_values_expired_by_its_flush():
+    """Values the flush regenerates are loaded before the instance is read, including a computed `on` key."""
+    async with get_session():
+        box = await Box.objects.create(side=2)
+        box.side = 3
+
+        written = await Box.objects.bulk_upsert([box], on=Box.area)
+
+        assert written == 1
+        assert (box.area, box.revision) == (9, 1)
 
 
 async def test_bulk_upsert_rejects_computed_update_fields():

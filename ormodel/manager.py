@@ -2,7 +2,7 @@ from collections.abc import Awaitable, Callable, Iterable, Sequence
 from functools import wraps
 from typing import TYPE_CHECKING, Any, Concatenate, Generic, ParamSpec, TypeVar, cast
 
-from sqlalchemy import func
+from sqlalchemy import func, inspect
 from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as postgresql_insert
 from sqlalchemy.dialects.sqlite import insert as sqlite_insert
@@ -312,6 +312,10 @@ class Manager(Query[ModelType]):
         # The statement does not autoflush: write pending changes first so they are ordered before it, pending
         # inputs get their generated keys before being read, and the refresh below does not discard them.
         await session.flush()
+        for obj in objs:
+            # The flush expires values generated on write; load them here rather than lazily (which needs a greenlet).
+            if expired := inspect(obj, raiseerr=True).expired_attributes:
+                await session.refresh(obj, attribute_names=list(expired))
 
         keyed: dict[tuple[Any, ...], dict[str, Any]] = {}
         unkeyed: list[dict[str, Any]] = []
