@@ -363,8 +363,11 @@ class Manager(Query[ModelType]):
                 result = await session.exec(stmt)
                 written += result.rowcount
         # The statement bypasses the identity map: refresh instances this session already holds.
-        for held in list(session.identity_map.values()):
-            if isinstance(held, self._model_cls) and tuple(getattr(held, key) for key in keys) in keyed:
+        for held in [held for held in session.identity_map.values() if isinstance(held, self._model_cls)]:
+            # The flush may also have expired generated keys on instances that were not passed in.
+            if expired := inspect(held, raiseerr=True).expired_attributes & set(keys):
+                await session.refresh(held, attribute_names=list(expired))
+            if tuple(getattr(held, key) for key in keys) in keyed:
                 await session.refresh(held)
         return written
 

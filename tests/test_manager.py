@@ -849,6 +849,18 @@ async def test_bulk_upsert_loads_values_expired_by_its_flush():
         assert (box.area, box.revision) == (9, 1)
 
 
+async def test_bulk_upsert_loads_keys_expired_on_other_held_instances():
+    """Generated keys the flush expires on instances not passed in are loaded before they are compared."""
+    async with get_session():
+        held = await Box.objects.create(side=2)
+        held.side = 3
+
+        written = await Box.objects.bulk_upsert([Box(side=5)], on=Box.area)
+
+        assert written == 1
+        assert held.area == 9
+
+
 async def test_bulk_upsert_rejects_computed_update_fields():
     """Asking to copy a computed column onto existing rows is refused."""
     with pytest.raises(ValueError, match="computed columns"):
