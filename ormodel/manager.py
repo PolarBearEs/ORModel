@@ -289,8 +289,8 @@ class Manager(Query[ModelType]):
 
         Same rules as upsert(), except that `on` must be covered by a unique constraint or index, conflicting
         rows get the union of the fields set on the instances (except values left for the database to generate),
-        and instances repeating the same `on` values collapse to the last one (instances with an unset `on` value
-        are not collapsed). Returns the number of rows inserted or updated; the instances passed in are not
+        and instances repeating the same `on` values collapse to the last one (instances with an unset or computed
+        `on` value are not collapsed). Returns the number of rows inserted or updated; the instances passed in are not
         refreshed.
         """
         if chunk_size <= 0:
@@ -333,7 +333,8 @@ class Manager(Query[ModelType]):
                 )
             }
             key = tuple(getattr(obj, name) for name in keys)
-            if any(value is None for value in key):
+            # A computed key is only known once the database writes the row: the instance may hold a stale value.
+            if any(value is None for value in key) or computed & set(keys):
                 unkeyed.append(row)  # Inserted unless the database fills in a conflicting key.
             else:
                 keyed[key] = row

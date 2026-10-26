@@ -27,6 +27,14 @@ class Tick(ORModel, table=True):
     source: str | None = Field(default=None, sa_column_kwargs={"server_default": text("'clock'")})
 
 
+class Coupon(ORModel, table=True):
+    """A unique key the database rewrites on update."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    code: str | None = Field(default=None, unique=True, sa_column_kwargs={"onupdate": text("'used'")})
+    uses: int = 0
+
+
 class Box(ORModel, table=True):
     """A column computed by the database."""
 
@@ -852,13 +860,13 @@ async def test_bulk_upsert_loads_values_expired_by_its_flush():
 async def test_bulk_upsert_loads_keys_expired_on_other_held_instances():
     """Generated keys the flush expires on instances not passed in are loaded before they are compared."""
     async with get_session():
-        held = await Box.objects.create(side=2)
-        held.side = 3
+        held = await Coupon.objects.create(code="new")
+        held.uses = 1
 
-        written = await Box.objects.bulk_upsert([Box(side=5, area=25)], on=Box.area)
+        written = await Coupon.objects.bulk_upsert([Coupon(code="other")], on=Coupon.code)
 
         assert written == 1
-        assert held.area == 9
+        assert held.code == "used"
 
 
 async def test_bulk_upsert_refreshes_rows_matched_by_a_computed_key():
@@ -870,6 +878,21 @@ async def test_bulk_upsert_refreshes_rows_matched_by_a_computed_key():
 
         assert written == 1
         assert held.side == -2
+
+
+async def test_bulk_upsert_matches_computed_keys_in_the_database():
+    """A stale computed value held by an input is ignored: the row it conflicts with is refreshed."""
+    async with get_session() as session:
+        detached = await Box.objects.create(side=2)
+        held = await Box.objects.create(side=3)
+        session.expunge(detached)
+        detached.side = -3
+
+        written = await Box.objects.bulk_upsert([detached], on=Box.area)
+
+        assert written == 1
+        assert held.side == -3
+    assert sorted(box.side for box in await Box.objects.all()) == [-3, 2]
 
 
 async def test_bulk_upsert_rejects_computed_update_fields():
