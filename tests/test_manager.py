@@ -855,10 +855,21 @@ async def test_bulk_upsert_loads_keys_expired_on_other_held_instances():
         held = await Box.objects.create(side=2)
         held.side = 3
 
-        written = await Box.objects.bulk_upsert([Box(side=5)], on=Box.area)
+        written = await Box.objects.bulk_upsert([Box(side=5, area=25)], on=Box.area)
 
         assert written == 1
         assert held.area == 9
+
+
+async def test_bulk_upsert_refreshes_rows_matched_by_a_computed_key():
+    """A held row updated through a key the database computes is refreshed, though the input leaves it unset."""
+    async with get_session():
+        held = await Box.objects.create(side=2)
+
+        written = await Box.objects.bulk_upsert([Box(side=-2)], on=Box.area)
+
+        assert written == 1
+        assert held.side == -2
 
 
 async def test_bulk_upsert_rejects_computed_update_fields():

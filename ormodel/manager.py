@@ -290,7 +290,7 @@ class Manager(Query[ModelType]):
         Same rules as upsert(), except that `on` must be covered by a unique constraint or index, conflicting
         rows get the union of the fields set on the instances (except values left for the database to generate),
         and instances repeating the same `on` values collapse to the last one (instances with an unset `on` value
-        are always inserted). Returns the number of rows inserted or updated; the instances passed in are not
+        are not collapsed). Returns the number of rows inserted or updated; the instances passed in are not
         refreshed.
         """
         if chunk_size <= 0:
@@ -334,7 +334,7 @@ class Manager(Query[ModelType]):
             }
             key = tuple(getattr(obj, name) for name in keys)
             if any(value is None for value in key):
-                unkeyed.append(row)  # NULL never conflicts: always a new row.
+                unkeyed.append(row)  # Inserted unless the database fills in a conflicting key.
             else:
                 keyed[key] = row
         # A multi-row VALUES needs the same columns in every row.
@@ -362,13 +362,19 @@ class Manager(Query[ModelType]):
                     stmt = stmt.on_conflict_do_nothing(index_elements=index_elements)
                 result = await session.exec(stmt)
                 written += result.rowcount
-        # The statement bypasses the identity map: refresh instances this session already holds.
+        # The statement bypasses the identity map: refresh instances this session already holds. A key the database
+        # fills in (computed or server default) is unknown for unkeyed rows, so any held row may have been updated.
+        refresh_all = bool(unkeyed) and any(
+            columns[name].computed is not None or columns[name].server_default is not None for name in keys
+        )
         for held in [held for held in session.identity_map.values() if isinstance(held, self._model_cls)]:
-            # The flush may also have expired generated keys on instances that were not passed in.
-            if expired := inspect(held, raiseerr=True).expired_attributes & set(keys):
-                await session.refresh(held, attribute_names=list(expired))
-            if tuple(getattr(held, key) for key in keys) in keyed:
-                await session.refresh(held)
+            if not refresh_all:
+                # The flush may also have expired generated keys on instances that were not passed in.
+                if expired := inspect(held, raiseerr=True).expired_attributes & set(keys):
+                    await session.refresh(held, attribute_names=list(expired))
+                if tuple(getattr(held, key) for key in keys) not in keyed:
+                    continue
+            await session.refresh(held)
         return written
 
     # --- Helpers ---
