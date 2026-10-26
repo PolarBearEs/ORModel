@@ -360,9 +360,9 @@ class Manager(Query[ModelType]):
             # statement: write them one at a time, in order (the last one wins, as with keyed duplicates).
             batches = [(tuple(row), [row]) for row in ordered.values()]
         else:
-            # Rows with explicit keys go first so keys assigned automatically (autoincrement) cannot take them.
-            rows = [row for key, row in ordered.items() if isinstance(key, tuple)]
-            rows += [row for key, row in ordered.items() if not isinstance(key, tuple)]
+            # Rows with explicit primary keys go first so keys assigned automatically (autoincrement) cannot take them.
+            primary_key = [columns[name].key for name in self._primary_key()]
+            rows = sorted(ordered.values(), key=lambda row: not all(key in row for key in primary_key))
             # A multi-row VALUES needs the same columns in every row.
             grouped: dict[tuple[str, ...], list[dict[str, Any]]] = {}
             for row in rows:

@@ -935,6 +935,13 @@ async def test_bulk_upsert_reserves_explicit_primary_keys_before_autoincrement()
     assert written == 2
     assert sorted((team.id, team.name) for team in await Team.objects.all()) == [(1, "Set"), (2, "Auto")]
 
+    # Also when matching on another unique field that every input supplies.
+    written = await Team.objects.bulk_upsert(
+        [Team(name="Auto 2", headquarters="A"), Team(id=3, name="Set 2", headquarters="S")], on="name"
+    )
+    assert written == 2
+    assert sorted((team.id, team.name) for team in await Team.objects.all())[2:] == [(3, "Set 2"), (4, "Auto 2")]
+
 
 async def test_bulk_upsert_applies_explicit_and_default_keys_in_input_order():
     """An explicit key matching an earlier input's server default is written after it, so the last input wins."""
