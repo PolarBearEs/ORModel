@@ -3,7 +3,7 @@ from enum import StrEnum
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import Column, String, text
+from sqlalchemy import Column, Computed, Integer, String, text
 from sqlalchemy.exc import IntegrityError, PendingRollbackError
 from sqlalchemy.orm.exc import DetachedInstanceError
 from sqlmodel import Field, col
@@ -25,6 +25,14 @@ class Tick(ORModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     source: str | None = Field(default=None, sa_column_kwargs={"server_default": text("'clock'")})
+
+
+class Box(ORModel, table=True):
+    """A column computed by the database."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    side: int
+    area: int | None = Field(default=None, sa_column=Column(Integer, Computed("side * side")))
 
 
 # Mark all tests in this module to use pytest-asyncio
@@ -800,6 +808,36 @@ async def test_bulk_upsert_keeps_pending_changes():
 
     stored = await Hero.objects.get(name="Pending")
     assert (stored.age, stored.secret_name) == (21, "New")
+
+
+async def test_bulk_upsert_flushes_pending_inputs_once():
+    """An input already pending in the session is inserted once, then upserted under its new key."""
+    async with get_session() as session:
+        hero = Hero(name="Pending", secret_name="Once")
+        session.add(hero)
+
+        written = await Hero.objects.bulk_upsert([hero])
+
+    assert written == 1
+    assert [stored.id for stored in await Hero.objects.filter(name="Pending").all()] == [hero.id]
+
+
+async def test_bulk_upsert_leaves_computed_columns_to_the_database():
+    """Computed values are neither inserted nor updated, even when the instance holds one."""
+    box = await Box.objects.create(side=2)
+    assert box.area == 4
+    box.side = 3
+
+    written = await Box.objects.bulk_upsert([box, Box(side=5)])
+
+    assert written == 2
+    assert sorted((stored.side, stored.area) for stored in await Box.objects.all()) == [(3, 9), (5, 25)]
+
+
+async def test_bulk_upsert_rejects_computed_update_fields():
+    """Asking to copy a computed column onto existing rows is refused."""
+    with pytest.raises(ValueError, match="computed columns"):
+        await Box.objects.bulk_upsert([Box(side=2)], update_fields=[Box.area])
 
 
 async def test_bulk_upsert_maps_fields_to_renamed_columns():

@@ -299,6 +299,20 @@ class Manager(Query[ModelType]):
         keys = self._on_fields(on)
         updates = self._update_fields(objs, keys, update_fields)
         columns = self._columns()
+        # Computed columns are always written by the database, which rejects explicit values for them.
+        computed = {name for name, column in columns.items() if column.computed is not None}
+        if update_fields is not None and (listed := computed & set(updates)):
+            raise ValueError(f"update_fields cannot include computed columns: {sorted(listed)}")
+        updates = [name for name in updates if name not in computed]
+
+        session = self._get_session()
+        dialect = session.bind.dialect.name if session.bind is not None else None
+        if dialect not in _DIALECT_INSERTS:
+            raise NotImplementedError(f"bulk_upsert() is not supported for the {dialect!r} dialect.")
+        # The statement does not autoflush: write pending changes first so they are ordered before it, pending
+        # inputs get their generated keys before being read, and the refresh below does not discard them.
+        await session.flush()
+
         keyed: dict[tuple[Any, ...], dict[str, Any]] = {}
         unkeyed: list[dict[str, Any]] = []
         for obj in objs:
@@ -307,9 +321,12 @@ class Manager(Query[ModelType]):
             row = {
                 column.key: value
                 for name, column in columns.items()
-                if (value := getattr(obj, name)) is not None
-                or (name in obj.model_fields_set and not column.primary_key)
-                or not (column.primary_key or column.default is not None or column.server_default is not None)
+                if name not in computed
+                and (
+                    (value := getattr(obj, name)) is not None
+                    or (name in obj.model_fields_set and not column.primary_key)
+                    or not (column.primary_key or column.default is not None or column.server_default is not None)
+                )
             }
             key = tuple(getattr(obj, name) for name in keys)
             if any(value is None for value in key):
@@ -321,15 +338,8 @@ class Manager(Query[ModelType]):
         for row in [*keyed.values(), *unkeyed]:
             batches.setdefault(tuple(row), []).append(row)
 
-        session = self._get_session()
-        dialect = session.bind.dialect.name if session.bind is not None else None
-        if dialect not in _DIALECT_INSERTS:
-            raise NotImplementedError(f"bulk_upsert() is not supported for the {dialect!r} dialect.")
         table = self._model_cls.__table__  # type: ignore[attr-defined]
         index_elements = [columns[name] for name in keys]
-        # The statement does not autoflush: write pending changes first so they are ordered before it and the
-        # refresh below does not discard them.
-        await session.flush()
         written = 0
         for supplied, batch in batches.items():
             if not supplied:
