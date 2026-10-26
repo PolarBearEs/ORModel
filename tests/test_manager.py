@@ -43,6 +43,14 @@ class Setting(ORModel, table=True):
     value: str
 
 
+class Preference(ORModel, table=True):
+    """A unique key with a client-side column default."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    scope: str | None = Field(default=None, unique=True, sa_column_kwargs={"default": "global"})
+    value: str
+
+
 class Box(ORModel, table=True):
     """A column computed by the database."""
 
@@ -939,6 +947,18 @@ async def test_bulk_upsert_applies_explicit_and_default_keys_in_input_order():
         [Setting(value="again"), Setting(id=1, scope="global", value="final")], on="scope"
     )
     assert [(setting.scope, setting.value) for setting in await Setting.objects.all()] == [("global", "final")]
+
+
+async def test_bulk_upsert_applies_explicit_and_client_default_keys_in_input_order():
+    """A key filled in by a client-side column default is also written in input order, so the last input wins."""
+    await Preference.objects.bulk_upsert(
+        [Preference(value="earlier"), Preference(scope="global", value="last")], on="scope"
+    )
+    assert [(pref.scope, pref.value) for pref in await Preference.objects.all()] == [("global", "last")]
+
+    # Several inputs defaulting to the same key update the same row one at a time.
+    await Preference.objects.bulk_upsert([Preference(value="a"), Preference(value="b")], on="scope")
+    assert [(pref.scope, pref.value) for pref in await Preference.objects.all()] == [("global", "b")]
 
 
 async def test_bulk_upsert_accepts_detached_inputs_with_expired_computed_values():

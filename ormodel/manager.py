@@ -304,9 +304,12 @@ class Manager(Query[ModelType]):
         if update_fields is not None and (listed := computed & set(updates)):
             raise ValueError(f"update_fields cannot include computed columns: {sorted(listed)}")
         updates = [name for name in updates if name not in computed]
-        # A key the database fills in is unknown until the row is written: a computed value held by an instance may
-        # be stale, and an unset server default is only known after the insert.
-        generated_key = any(name in computed or columns[name].server_default is not None for name in keys)
+        # A key filled in on write is unknown until the row is written: a computed value held by an instance may be
+        # stale, and an unset default (client or server side) is only known after the insert.
+        generated_key = any(
+            name in computed or columns[name].default is not None or columns[name].server_default is not None
+            for name in keys
+        )
 
         session = self._get_session()
         dialect = session.bind.dialect.name if session.bind is not None else None
