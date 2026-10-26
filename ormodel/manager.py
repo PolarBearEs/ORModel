@@ -304,6 +304,9 @@ class Manager(Query[ModelType]):
         if update_fields is not None and (listed := computed & set(updates)):
             raise ValueError(f"update_fields cannot include computed columns: {sorted(listed)}")
         updates = [name for name in updates if name not in computed]
+        # A key the database fills in is unknown until the row is written: a computed value held by an instance may
+        # be stale, and an unset server default is only known after the insert.
+        generated_key = any(name in computed or columns[name].server_default is not None for name in keys)
 
         session = self._get_session()
         dialect = session.bind.dialect.name if session.bind is not None else None
@@ -314,30 +317,36 @@ class Manager(Query[ModelType]):
         await session.flush()
         for obj in objs:
             # The flush expires values generated on write; load them here rather than lazily (which needs a greenlet).
-            if expired := inspect(obj, raiseerr=True).expired_attributes:
+            if (expired := inspect(obj, raiseerr=True).expired_attributes) and obj in session:
                 await session.refresh(obj, attribute_names=list(expired))
+        generated = {
+            name
+            for name, column in columns.items()
+            if column.computed is not None or column.server_default is not None or column.onupdate is not None
+        }
 
         keyed: dict[tuple[Any, ...], dict[str, Any]] = {}
         unkeyed: list[dict[str, Any]] = []
         for obj in objs:
+            # Generated values still expired (on a detached input) are unknown: leave them to the database.
+            unknown = computed | (inspect(obj, raiseerr=True).expired_attributes & generated)
             # Like a regular insert, leave unset generated values (autoincrement, server defaults) to the database,
             # but keep a None that was set explicitly so it clears the stored value.
             row = {
                 column.key: value
                 for name, column in columns.items()
-                if name not in computed
+                if name not in unknown
                 and (
                     (value := getattr(obj, name)) is not None
                     or (name in obj.model_fields_set and not column.primary_key)
                     or not (column.primary_key or column.default is not None or column.server_default is not None)
                 )
             }
-            key = tuple(getattr(obj, name) for name in keys)
             # A computed key is only known once the database writes the row: the instance may hold a stale value.
-            if any(value is None for value in key) or computed & set(keys):
+            if unknown & set(keys) or any(getattr(obj, name) is None for name in keys):
                 unkeyed.append(row)  # Inserted unless the database fills in a conflicting key.
             else:
-                keyed[key] = row
+                keyed[tuple(getattr(obj, name) for name in keys)] = row
         # A multi-row VALUES needs the same columns in every row.
         batches: dict[tuple[str, ...], list[dict[str, Any]]] = {}
         for row in [*keyed.values(), *unkeyed]:
@@ -345,6 +354,9 @@ class Manager(Query[ModelType]):
 
         table = self._model_cls.__table__  # type: ignore[attr-defined]
         index_elements = [columns[name] for name in keys]
+        # Unkeyed rows with a generated key may conflict with the same row, which PostgreSQL rejects within one
+        # statement: write them one at a time (the last one wins, as with keyed duplicates).
+        step = 1 if generated_key and unkeyed else chunk_size
         written = 0
         for supplied, batch in batches.items():
             if not supplied:
@@ -354,8 +366,8 @@ class Manager(Query[ModelType]):
                 continue
             # Columns left to the database are not copied over a stored value.
             batch_updates = [columns[name].key for name in updates if columns[name].key in supplied]
-            for start in range(0, len(batch), chunk_size):
-                stmt = _DIALECT_INSERTS[dialect](table).values(batch[start : start + chunk_size])
+            for start in range(0, len(batch), step):
+                stmt = _DIALECT_INSERTS[dialect](table).values(batch[start : start + step])
                 if batch_updates:
                     set_ = {key: stmt.excluded[key] for key in batch_updates}
                     stmt = stmt.on_conflict_do_update(index_elements=index_elements, set_=set_)
@@ -363,11 +375,9 @@ class Manager(Query[ModelType]):
                     stmt = stmt.on_conflict_do_nothing(index_elements=index_elements)
                 result = await session.exec(stmt)
                 written += result.rowcount
-        # The statement bypasses the identity map: refresh instances this session already holds. A key the database
-        # fills in (computed or server default) is unknown for unkeyed rows, so any held row may have been updated.
-        refresh_all = bool(unkeyed) and any(
-            columns[name].computed is not None or columns[name].server_default is not None for name in keys
-        )
+        # The statement bypasses the identity map: refresh instances this session already holds. With a generated
+        # key, unkeyed rows may have updated any of them.
+        refresh_all = generated_key and bool(unkeyed)
         for held in [held for held in session.identity_map.values() if isinstance(held, self._model_cls)]:
             if not refresh_all:
                 # The flush may also have expired generated keys on instances that were not passed in.

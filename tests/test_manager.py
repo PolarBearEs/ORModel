@@ -3,7 +3,7 @@ from enum import StrEnum
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import Column, Computed, Integer, String, text
+from sqlalchemy import Column, Computed, Integer, String, inspect, text
 from sqlalchemy.exc import IntegrityError, PendingRollbackError
 from sqlalchemy.orm.exc import DetachedInstanceError
 from sqlmodel import Field, col
@@ -893,6 +893,32 @@ async def test_bulk_upsert_matches_computed_keys_in_the_database():
         assert written == 1
         assert held.side == -3
     assert sorted(box.side for box in await Box.objects.all()) == [-3, 2]
+
+
+async def test_bulk_upsert_writes_inputs_conflicting_on_a_computed_key_one_at_a_time():
+    """Inputs whose computed keys hit the same row are each applied (PostgreSQL rejects that in one statement)."""
+    first = await Box.objects.create(side=2)
+    second = await Box.objects.get(id=first.id)
+    second.side = -2
+
+    written = await Box.objects.bulk_upsert([first, second], on=Box.area)
+
+    assert written == 2
+    assert [box.side for box in await Box.objects.all()] == [-2]
+
+
+async def test_bulk_upsert_accepts_detached_inputs_with_expired_computed_values():
+    """A detached input whose only expired value is computed is written without reloading it."""
+    async with get_session() as session:
+        box = await Box.objects.create(side=2)
+        box.side = 3
+        await session.flush()
+    assert "area" in inspect(box).expired_attributes
+
+    written = await Box.objects.bulk_upsert([box])
+
+    assert written == 1
+    assert [(stored.side, stored.area) for stored in await Box.objects.all()] == [(3, 9)]
 
 
 async def test_bulk_upsert_rejects_computed_update_fields():
