@@ -35,6 +35,14 @@ class Coupon(ORModel, table=True):
     uses: int = 0
 
 
+class Setting(ORModel, table=True):
+    """A unique key with a server default."""
+
+    id: int | None = Field(default=None, primary_key=True)
+    scope: str | None = Field(default=None, unique=True, sa_column_kwargs={"server_default": text("'global'")})
+    value: str
+
+
 class Box(ORModel, table=True):
     """A column computed by the database."""
 
@@ -908,6 +916,13 @@ async def test_bulk_upsert_writes_inputs_conflicting_on_a_computed_key_one_at_a_
 
     await Box.objects.bulk_upsert([Box(side=2), Box(side=-2, revision=7), Box(side=2)], on=Box.area)
     assert [box.side for box in await Box.objects.all()] == [2]
+
+
+async def test_bulk_upsert_applies_explicit_and_default_keys_in_input_order():
+    """An explicit key matching an earlier input's server default is written after it, so the last input wins."""
+    await Setting.objects.bulk_upsert([Setting(value="earlier"), Setting(scope="global", value="last")], on="scope")
+
+    assert [(setting.scope, setting.value) for setting in await Setting.objects.all()] == [("global", "last")]
 
 
 async def test_bulk_upsert_accepts_detached_inputs_with_expired_computed_values():

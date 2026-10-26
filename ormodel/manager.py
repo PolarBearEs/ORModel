@@ -325,8 +325,9 @@ class Manager(Query[ModelType]):
             if column.computed is not None or column.server_default is not None or column.onupdate is not None
         }
 
-        keyed: dict[tuple[Any, ...], dict[str, Any]] = {}
-        unkeyed: list[dict[str, Any]] = []
+        # Rows in input order; instances repeating a key collapse to the last one, at its position.
+        ordered: dict[object, dict[str, Any]] = {}
+        unkeyed = False
         for obj in objs:
             # Generated values still expired (on a detached input) are unknown: leave them to the database.
             unknown = computed | (inspect(obj, raiseerr=True).expired_attributes & generated)
@@ -344,10 +345,13 @@ class Manager(Query[ModelType]):
             }
             # A computed key is only known once the database writes the row: the instance may hold a stale value.
             if unknown & set(keys) or any(getattr(obj, name) is None for name in keys):
-                unkeyed.append(row)  # Inserted unless the database fills in a conflicting key.
+                ordered[object()] = row  # Inserted unless the database fills in a conflicting key.
+                unkeyed = True
             else:
-                keyed[tuple(getattr(obj, name) for name in keys)] = row
-        rows = [*keyed.values(), *unkeyed]
+                key = tuple(getattr(obj, name) for name in keys)
+                ordered.pop(key, None)
+                ordered[key] = row
+        rows = list(ordered.values())
         batches: list[tuple[tuple[str, ...], list[dict[str, Any]]]]
         if generated_key and unkeyed:
             # Unkeyed rows with a generated key may conflict with the same row, which PostgreSQL rejects within one
@@ -382,13 +386,13 @@ class Manager(Query[ModelType]):
                 written += result.rowcount
         # The statement bypasses the identity map: refresh instances this session already holds. With a generated
         # key, unkeyed rows may have updated any of them.
-        refresh_all = generated_key and bool(unkeyed)
+        refresh_all = generated_key and unkeyed
         for held in [held for held in session.identity_map.values() if isinstance(held, self._model_cls)]:
             if not refresh_all:
                 # The flush may also have expired generated keys on instances that were not passed in.
                 if expired := inspect(held, raiseerr=True).expired_attributes & set(keys):
                     await session.refresh(held, attribute_names=list(expired))
-                if tuple(getattr(held, key) for key in keys) not in keyed:
+                if tuple(getattr(held, key) for key in keys) not in ordered:
                     continue
             await session.refresh(held)
         return written
