@@ -87,9 +87,7 @@ class TeamRead(ORModel):
 @app.post("/teams/", response_model=TeamRead, status_code=201, dependencies=DB_ROUTE_DEPENDENCIES)
 async def create_new_team(team_data: TeamCreate):
     """Creates a new team, handling potential duplicates."""
-    team, created = await Team.objects.get_or_create(
-        name=team_data.name, defaults={"headquarters": team_data.headquarters}
-    )
+    team, created = await Team.objects.get_or_create(Team.model_validate(team_data), on=Team.name)
     if not created:
         raise HTTPException(status_code=409, detail=f"Team with name '{team_data.name}' already exists.")
     return team

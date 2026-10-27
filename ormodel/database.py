@@ -9,6 +9,7 @@ from sqlalchemy import event
 from sqlalchemy.engine import URL, make_url
 from sqlalchemy.ext.asyncio import AsyncEngine, async_sessionmaker, create_async_engine
 from sqlalchemy.pool import NullPool
+from sqlmodel import SQLModel
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from .exceptions import SessionContextError
@@ -58,6 +59,8 @@ def _configure_sqlite_engine(engine: AsyncEngine, url: URL, busy_timeout_ms: int
 def init_database(database_url: str, echo_sql: bool = False):
     global _engine, _session_factory, _is_shutdown
     if _engine is not None:
+        if _engine.url != make_url(database_url):
+            raise RuntimeError("Database already initialized with a different URL. Call shutdown_database() first.")
         logger.debug("Database already initialized. Skipping.")
         return
     logger.debug("Initializing database with URL: %s", database_url)
@@ -115,6 +118,11 @@ async def database_context(database_url: str, echo_sql: bool = False) -> AsyncGe
     _database_context_active = True
     try:
         init_database(database_url, echo_sql)
+    except BaseException:
+        # Nothing was initialized here, so leave any existing engine alone.
+        _database_context_active = False
+        raise
+    try:
         logger.debug("Entered database_context, DB initialized.")
         yield
     finally:
@@ -151,6 +159,14 @@ async def get_session() -> AsyncGenerator[AsyncSession, None]:
         if token:
             db_session_context.reset(token)
         await session.close()
+
+
+async def create_tables(drop_existing: bool = False) -> None:
+    """Create every table registered in the SQLModel metadata (optionally dropping them first)."""
+    async with get_engine().begin() as connection:
+        if drop_existing:
+            await connection.run_sync(SQLModel.metadata.drop_all)
+        await connection.run_sync(SQLModel.metadata.create_all)
 
 
 def get_engine() -> AsyncEngine:

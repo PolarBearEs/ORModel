@@ -24,6 +24,7 @@ classifiers = [
 ]
 dependencies = [
     "sqlmodel>=0.0.37",
+    "sqlalchemy[asyncio]>=2.0",
 ]
 
 [project.urls]
@@ -64,6 +65,10 @@ ignore = []
 
 [tool.ruff.format]
 quote-style = "double"
+
+[tool.coverage.run]
+# SQLAlchemy's async layer runs flushes in greenlets; without this, lines after them go untraced.
+concurrency = ["greenlet", "thread"]
 
 [tool.pytest_env]
 DATABASE_URL = "sqlite+aiosqlite:///./default.db"
